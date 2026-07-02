@@ -1,0 +1,9 @@
+{
+	"_comment": "Copy next to the binary as 'yirang_onnx_configurations.json'; CLI args override. write_console/write_file are LogTypes ints (0=None); keep write_console 0 for clean stdout.",
+	"app_title": "yirang-onnx",
+	"output_format": "summary",
+	"log_root_path": "",
+	"write_console": 0,
+	"write_file": 0,
+	"write_interval": 1000
+}
