@@ -1,0 +1,23 @@
+{
+	"name": "yirang-onnx",
+	"version": "0.1.0",
+	"description": "Lightweight ONNX model parser (CppToolkit-based) that extracts structure, operators, tensors and metadata for analysis and visualization.",
+	"builtin-baseline": "3b0889cf230111ed798c9f5c4511a87cdbdc21ea",
+	"dependencies": [
+		"protobuf",
+		"lz4",
+		"efsw",
+		"boost-system",
+		"boost-filesystem",
+		"boost-json",
+		"boost-asio",
+		"boost-dll",
+		"gtest"
+	],
+	"overrides": [
+		{
+			"name": "efsw",
+			"version": "1.4.1"
+		}
+	]
+}
