@@ -2,10 +2,11 @@
 #include "OnnxModel.h"
 
 #include "ArgumentParser.h"
+#include "File.h"
 #include "Logger.h"
+#include "RunCommand.h"
 
 #include <format>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -17,16 +18,17 @@ namespace
 {
 	auto print_usage(void) -> void
 	{
-		std::cerr << "usage: yirang-onnx --model <path.onnx> [--format summary|json|dot] [--out <path>]\n"
-					 "                   [--title <name>] [--log_root_path <dir>]\n"
-					 "                   [--write_console_log <LogTypes>] [--write_file_log <LogTypes>]\n";
+		Logger::handle().write(LogTypes::Error, "usage:\n"
+												"  inspect : yirang-onnx --model <path.onnx> [--format summary|json|dot] [--out <path>] [--weights true]\n"
+												"  infer   : yirang-onnx --model <path.onnx> --input <in.pb>[,<in2.pb>] [--out-dir <dir>]\n"
+												"  common  : [--title <name>] [--log_root_path <dir>] [--write_console_log <LogTypes>] [--write_file_log <LogTypes>]");
 	}
 
-	auto render(const OnnxModel& model, const std::string& format) -> std::string
+	auto render(const OnnxModel& model, const std::string& format, bool include_weights) -> std::string
 	{
 		if (format == "json")
 		{
-			return model.to_json();
+			return model.to_json(include_weights);
 		}
 		if (format == "dot")
 		{
@@ -44,6 +46,7 @@ auto main(int argc, char* argv[]) -> int
 	Logger::handle().console_mode(configurations->write_console());
 	Logger::handle().write_interval(configurations->write_interval());
 	Logger::handle().log_root(configurations->log_root_path());
+
 	Logger::handle().start(configurations->app_title());
 
 	int exit_code = 0;
@@ -52,18 +55,20 @@ auto main(int argc, char* argv[]) -> int
 	{
 		Logger::handle().write(LogTypes::Error, std::format("invalid configuration: {}", reason.value()));
 		print_usage();
-		std::cerr << "error: " << reason.value() << '\n';
 		exit_code = 2;
+	}
+	else if (!configurations->input_paths().empty())
+	{
+		exit_code = run_inference(configurations->model_path(), configurations->input_paths(), configurations->output_dir());
 	}
 	else if (auto [model, error] = OnnxModel::load(configurations->model_path()); !model.has_value())
 	{
 		Logger::handle().write(LogTypes::Error, error.value_or("unknown error"));
-		std::cerr << "error: " << error.value_or("unknown error") << '\n';
 		exit_code = 1;
 	}
 	else
 	{
-		const std::string rendered = render(model.value(), configurations->output_format());
+		const std::string rendered = render(model.value(), configurations->output_format(), configurations->include_weights());
 		const std::string out_path = configurations->output_path();
 
 		if (out_path.empty())
@@ -72,16 +77,20 @@ auto main(int argc, char* argv[]) -> int
 		}
 		else
 		{
-			std::ofstream out(out_path, std::ios::out | std::ios::binary | std::ios::trunc);
-			if (out.is_open())
+			File out;
+			if (auto opened = out.open(out_path, std::ios::out | std::ios::binary | std::ios::trunc); !opened)
 			{
-				out << rendered;
-				Logger::handle().write(LogTypes::Information, std::format("wrote {} to {}", configurations->output_format(), out_path));
+				Logger::handle().write(LogTypes::Error, std::format("cannot open output file '{}': {}", out_path, opened.error()));
+				exit_code = 1;
+			}
+			else if (auto written = out.write_bytes(reinterpret_cast<const uint8_t*>(rendered.data()), rendered.size()); !written)
+			{
+				Logger::handle().write(LogTypes::Error, std::format("cannot write output file '{}': {}", out_path, written.error()));
+				exit_code = 1;
 			}
 			else
 			{
-				std::cerr << "error: cannot open output file '" << out_path << "'\n";
-				exit_code = 1;
+				Logger::handle().write(LogTypes::Information, std::format("wrote {} to {}", configurations->output_format(), out_path));
 			}
 		}
 	}

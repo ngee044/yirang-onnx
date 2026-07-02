@@ -8,7 +8,6 @@
 
 #include <boost/json.hpp>
 
-
 namespace YirangOnnx
 {
 	namespace
@@ -19,9 +18,10 @@ namespace YirangOnnx
 	Configurations::Configurations(ArgumentParser&& arguments)
 		: config_file_name_("yirang_onnx_configurations.json")
 		, output_format_("summary")
+		, include_weights_(false)
 		, app_title_("yirang-onnx")
-		, write_console_(LogTypes::None)
-		, write_file_(LogTypes::None)
+		, write_console_(LogTypes::Information)
+		, write_file_(LogTypes::Information)
 		, write_interval_(1000)
 	{
 		root_path_ = arguments.program_folder();
@@ -36,6 +36,9 @@ namespace YirangOnnx
 	auto Configurations::model_path(void) const -> std::string { return model_path_; }
 	auto Configurations::output_format(void) const -> std::string { return output_format_; }
 	auto Configurations::output_path(void) const -> std::string { return output_path_; }
+	auto Configurations::include_weights(void) const -> bool { return include_weights_; }
+	auto Configurations::input_paths(void) const -> std::vector<std::string> { return input_paths_; }
+	auto Configurations::output_dir(void) const -> std::string { return output_dir_; }
 	auto Configurations::app_title(void) const -> std::string { return app_title_; }
 	auto Configurations::log_root_path(void) const -> std::string { return log_root_path_; }
 	auto Configurations::write_console(void) const -> LogTypes { return write_console_; }
@@ -91,6 +94,10 @@ namespace YirangOnnx
 		{
 			output_path_ = message.at("output_path").as_string().c_str();
 		}
+		if (message.contains("include_weights") && message.at("include_weights").is_bool())
+		{
+			include_weights_ = message.at("include_weights").as_bool();
+		}
 		if (message.contains("app_title") && message.at("app_title").is_string())
 		{
 			app_title_ = message.at("app_title").as_string().c_str();
@@ -126,6 +133,18 @@ namespace YirangOnnx
 		if (auto value = arguments.to_string("--out"); value.has_value())
 		{
 			output_path_ = value.value();
+		}
+		if (auto value = arguments.to_bool("--weights"); value.has_value())
+		{
+			include_weights_ = value.value();
+		}
+		if (auto value = arguments.to_array("--input"); value.has_value())
+		{
+			input_paths_ = value.value();
+		}
+		if (auto value = arguments.to_string("--out-dir"); value.has_value())
+		{
+			output_dir_ = value.value();
 		}
 		if (auto value = arguments.to_string("--title"); value.has_value())
 		{

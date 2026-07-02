@@ -29,7 +29,7 @@ namespace YirangOnnx
 
 		auto proto(void) const -> const onnx::ModelProto&;
 
-		auto to_json(void) const -> std::string;
+		auto to_json(bool include_initializer_data = false) const -> std::string;
 		auto to_dot(void) const -> std::string;
 		auto to_summary(void) const -> std::string;
 

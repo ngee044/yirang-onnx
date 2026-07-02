@@ -1,7 +1,8 @@
 # yirang-onnx
 
-모던 C++(C++23)로 작성한 경량·확장형 **ONNX 모델 파서**입니다. `.onnx` 파일을 읽어
-모델의 **구조·연산자·텐서·메타데이터**를 추출하여 분석 및 시각화합니다 — 재사용 가능한
+모던 C++(C++23)로 작성한 경량·확장형 **ONNX 모델 파서 + 추론 엔진**입니다. `.onnx`
+파일을 읽어 모델의 **구조·연산자·텐서·메타데이터**를 추출해 분석/시각화하고,
+**ONNX Runtime 기반 C++ 추론 엔진**으로 실제 추론을 실행합니다 — 재사용 가능한
 라이브러리와 소형 CLI로 제공합니다.
 
 > 포트폴리오 프로젝트. [CppToolkit](https://github.com/ngee044/CppToolkit)(C++23 유틸리티
@@ -19,57 +20,77 @@ yirang-onnx는 공식 `onnx.proto` 스키마를 벤더링하고 `protoc`로 C++ 
 - **조회(Inspect)** — 모델 메타데이터(IR 버전, producer, opset import, doc string, 커스텀 metadata).
 - **분석(Analyze)** — 그래프 입력/출력(dtype + 형상), 노드(op type·I/O·속성), initializer 텐서(dtype·형상·바이트 크기·inline/external), 연산자 히스토그램.
 - **시각화(Visualize)** — 계산 그래프를 [Graphviz](https://graphviz.org) DOT, 구조화된 JSON 리포트, 또는 사람이 읽는 요약으로 출력.
+- **추론(Infer)** — ONNX Runtime으로 모델을 실행: 입력 TensorProto(`.pb`)를 넣어 실제 출력 텐서를 얻습니다.
 
 ## 기능
 
 - 파일 로드(`OnnxModel::load`) 또는 인메모리 버퍼 파싱(`OnnxModel::parse`).
 - ONNX proto2 스키마(v1.17.0) 기반으로 opset에 무관하게 추출.
-- 3종 출력 포맷: `summary`(텍스트), `json`(분석), `dot`(시각화).
+- 3종 출력 포맷: `summary`(텍스트), `json`(분석), `dot`(시각화). `--weights`로 초기화자(가중치) **실제 값**을 JSON에 포함.
+- **추론 엔진**(`OnnxInference`, 별도 라이브러리): ONNX Runtime으로 `.onnx` + 입력 `.pb` → 출력 `.pb`. CMake 옵션으로 on/off(느슨한 결합, MSA 지향).
 - 파싱/IO 경계에서 오류는 예외를 던지지 않고 반환값으로 표현.
 - 의존성이 가벼운 작은 파사드 — 스키마를 건드리지 않고 새 뷰를 추가하도록 설계.
 
 ## 아키텍처
 
 ```
-OnnxCli (yirang-onnx)      Configurations + Logger + main → stdout / --out 파일
-      │ links
-OnnxParser (YirangOnnx)    OnnxModel 파사드 + ModelTypes 뷰 구조체
-      │ links                     │ links
-onnx_proto (onnx.pb)         CppToolkit::Utilities   (서브모듈: File / ArgumentParser
-proto/onnx.proto 에서 생성                            / JsonTool / Logger)
+OnnxCli (yirang-onnx)  ── Configurations + Logger + main → stdout / 파일
+   │ links                    │ links
+OnnxParser (YirangOnnx)     OnnxInference (YirangOnnx)
+   │ links                    │ links
+onnx_proto (onnx.pb)        onnxruntime (Homebrew prebuilt)
+   │ links
+CppToolkit::Utilities  (서브모듈: File / ArgumentParser / JsonTool / Logger)
 ```
 
-- **`OnnxParser`** — 코어 라이브러리(네임스페이스 `YirangOnnx`). `onnx_proto`는 생성된
-  `onnx.pb.{h,cc}`를 담는 OBJECT 라이브러리입니다.
-- **`OnnxCli`** — CLI 실행 파일 `yirang-onnx`. `Configurations`가 선택적 JSON 파일과
-  CLI 인자를 읽어(CLI 우선) 파서를 구동합니다.
+- **`OnnxParser`** — 코어 라이브러리(네임스페이스 `YirangOnnx`). 파싱·추출·렌더. `onnx_proto`는
+  생성된 `onnx.pb.{h,cc}`를 담는 OBJECT 라이브러리입니다.
+- **`OnnxInference`** — 별도 추론 라이브러리. ONNX Runtime만 링크하고 protobuf에
+  의존하지 않는 순수 엔진(`InferenceEngine`) — 파서와 느슨하게 결합됩니다. **ONNX Runtime
+  필요**(`brew install onnxruntime`).
+- **`OnnxCli`** — CLI 실행 파일 `yirang-onnx`. `Configurations`가 선택적 JSON 파일과 CLI
+  인자를 읽어(CLI 우선) 파서/추론을 위임합니다. TensorProto(`.pb`) ↔ 엔진 텐서 변환을 담당.
 - **`.CppToolkit`** — 서브모듈. `Utilities` 모듈만 빌드합니다.
 
 ## 요구 사항
 
 - C++23 컴파일러, **CMake 3.18+**, **Ninja**, **vcpkg**(`~/vcpkg`에 있다고 가정).
 - 의존성은 vcpkg(`vcpkg.json`)로 해결: protobuf, boost(json/system/filesystem/asio/dll), lz4, efsw, GoogleTest.
-- **macOS 참고:** 시스템 Apple clang가 C++23을 컴파일하지 못하는 경우(최신 macOS SDK
-  libc++가 `__builtin_clzg`를 요구), `build.sh`가 프로젝트와 vcpkg 의존성 빌드 모두를
-  **Homebrew LLVM clang**(`brew install llvm`)으로 자동 전환합니다. 이를 위한 별도 설정
-  파일은 리포에 커밋되지 않습니다(필요 시 `build/` 아래에 자동 생성).
+- **ONNX Runtime(추론 엔진에 필요):** 추론 엔진이 상시 빌드되므로 **ONNX Runtime**이 필요합니다 — `brew install onnxruntime`(prebuilt). 다른 위치면 `-DONNXRUNTIME_ROOT=<prefix>`.
+- **macOS 참고:** 시스템 Apple clang는 C++23 stdlib(최신 macOS SDK libc++의 `__builtin_clzg`)
+  를 컴파일하지 못하므로 **Homebrew LLVM clang**(`brew install llvm`)이 필요합니다. 이를
+  적용하는 오버레이 트리플릿 + chainload 툴체인은 `cmake/vcpkg-triplets/`에, 프리셋은
+  `CMakePresets.json`(프리셋 `macos-arm64`)에 **커밋**되어 있습니다. `build.sh`는 시스템
+  컴파일러를 프로브해 필요 시 이 오버레이로 Homebrew LLVM clang을 사용합니다(vcpkg 포트
+  포함).
 
 ## 빌드
+
+전제(macOS arm64): **vcpkg**가 `~/vcpkg`에 있고, `brew install llvm onnxruntime`(시스템 Apple clang로는 C++23 stdlib 빌드가 안 되어 Homebrew LLVM clang 사용, ONNX Runtime은 prebuilt 필요).
 
 ```bash
 git clone https://github.com/ngee044/yirang-onnx.git
 cd yirang-onnx
 git submodule update --init --recursive   # .CppToolkit 가져오기
+brew install llvm onnxruntime             # 전제 (Homebrew LLVM clang + ONNX Runtime)
 
-./build.sh                                # Release 빌드 (vcpkg + Ninja + C++23)
+# 방법 1) 스크립트 (컴파일러 자동 프로브/폴백)
+./build.sh
 #   FRESH_DEPS=1 ./build.sh               # vcpkg.json 변경 후
 #   BUILD_TYPE=Debug ./build.sh
+
+# 방법 2) CMake Presets (VS Code / CLion / 신규 클론에 권장)
+cmake --preset macos-arm64                # 커밋된 프리셋: Homebrew clang + vcpkg overlay
+cmake --build build -j
 ```
+
+**VS Code / CLion**: CMake Tools가 커밋된 `CMakePresets.json`을 읽습니다. Configure Preset으로 **`yirang-onnx (macOS arm64 + Homebrew LLVM)`**(`macos-arm64`)를 선택하세요. 자동 감지 kit(→ Apple clang)로는 vcpkg 의존성(boost-context 등)부터 실패합니다. 오버레이 트리플릿·chainload 툴체인은 `cmake/vcpkg-triplets/`에 커밋되어 있어 별도 설정이 필요 없습니다.
 
 산출물:
 
 - `build/out/yirang-onnx` — CLI
 - `build/lib/libOnnxParser.a` — 코어 라이브러리
+- `build/lib/libOnnxInference.a` — 추론 엔진
 - `build/out/onnx_parser_tests` — 테스트
 
 ## 사용법 (CLI)
@@ -84,11 +105,21 @@ build/out/yirang-onnx --model model.onnx --format json
 # Graphviz 시각화
 build/out/yirang-onnx --model model.onnx --format dot --out graph.dot
 build/out/yirang-onnx --model model.onnx --format dot | dot -Tsvg -o graph.svg
+
+# 초기화자(가중치) 실제 값을 JSON에 포함
+build/out/yirang-onnx --model model.onnx --format json --weights true --out params.json
+
+# 추론 실행: 입력 TensorProto(.pb) → 출력 .pb
+build/out/yirang-onnx --model model.onnx --input input.pb --out-dir outputs
+#   여러 입력: --input a.pb,b.pb   (각 .pb의 name 이 그래프 입력명과 일치해야 함)
 ```
 
 인자: `--model <path>`(필수), `--format summary|json|dot`(기본 `summary`),
-`--out <path>`, `--title <name>`, `--log_root_path <dir>`, `--write_console_log <level>`,
+`--out <path>`, `--weights <true|false>`(JSON에 가중치 값 포함),
+`--input <a.pb[,b.pb]>`(추론 입력 텐서), `--out-dir <dir>`(추론 출력 위치),
+`--title <name>`, `--log_root_path <dir>`, `--write_console_log <level>`,
 `--write_file_log <level>`, `--write_interval <ms>`.
+`--input`이 주어지면 추론 모드로 동작하며, 각 그래프 출력이 `<out-dir>/<name>.pb`로 저장됩니다.
 
 선택적 설정 파일: 바이너리 옆에 `yirang_onnx_configurations.json`을 두면 기본값을 설정할 수
 있습니다(CLI 인자가 우선). 예시는 `OnnxCli/yirang_onnx_configurations.sample.json` 참고.
@@ -154,13 +185,16 @@ GoogleTest 스위트(`tests/`)는 인메모리로 소형 모델을 만들어 파
 ```
 yirang-onnx/
 ├── OnnxParser/     # 코어 라이브러리 (OnnxModel 파사드, ModelTypes)
-├── OnnxCli/        # CLI (yirang-onnx): Configurations + main
+├── OnnxInference/  # 추론 엔진 (InferenceEngine, Tensor) — ONNX Runtime
+├── OnnxCli/        # CLI (yirang-onnx): Configurations + main + RunCommand
 ├── tests/          # GoogleTest 스위트
 ├── proto/          # 벤더링된 onnx.proto (ONNX v1.17.0, Apache-2.0)
 ├── .CppToolkit/    # CppToolkit 서브모듈 (Utilities 모듈 사용)
+├── cmake/vcpkg-triplets/  # 커밋된 overlay 트리플릿 + chainload 툴체인 (Homebrew LLVM)
 ├── docs/           # ISO 문서 (SRS/SAD/STP/RTM) + 코딩·모듈 가이드
 ├── build.sh        # vcpkg + Ninja 빌드 (macOS 컴파일러 폴백 포함)
 ├── vcpkg.json      # 매니페스트 (protobuf, boost, lz4, efsw, gtest)
+├── CMakePresets.json  # 커밋 프리셋 (default / macos-arm64) — VS Code / 신규 클론
 └── CMakeLists.txt
 ```
 
@@ -176,7 +210,7 @@ yirang-onnx/
 
 ## 기술 스택
 
-C++23 · Protocol Buffers · Boost.JSON · CppToolkit · vcpkg · CMake + Ninja · GoogleTest
+C++23 · Protocol Buffers · ONNX Runtime · Boost.JSON · CppToolkit · vcpkg · CMake + Ninja · GoogleTest
 
 ## 라이선스
 

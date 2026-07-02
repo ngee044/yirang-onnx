@@ -1,0 +1,7 @@
+{
+	"app_title": "yirang-onnx",
+	"output_format": "summary",
+	"include_weights": false,
+	"log_root_path": "logs/",
+	"write_interval": 1000
+}

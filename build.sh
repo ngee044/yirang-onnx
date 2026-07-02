@@ -65,37 +65,20 @@ if [ -n "${CXX:-}" ]; then
 	CMAKE_ARGS+=(-DCMAKE_C_COMPILER="${CC:-cc}" -DCMAKE_CXX_COMPILER="$CXX")
 
 	# vcpkg builds dependency ports in separate CMake runs that ignore the flags
-	# above. On arm64 macOS we generate a throwaway overlay triplet under build/
-	# (gitignored) whose chainload toolchain forces the same compiler + arch, so
-	# boost/protobuf build with the fallback compiler too. Nothing is committed.
+	# above. On arm64 macOS, use the committed overlay triplet (cmake/vcpkg-triplets)
+	# whose chainload toolchain forces the same compiler + arch — it honors the
+	# exported CC/CXX — so boost/protobuf build with the fallback compiler too.
+	# Same overlay is used by CMakePresets.json (VS Code / fresh clone).
 	if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
-		OVERLAY_DIR="$BUILD_DIR/vcpkg-overlay"
-		mkdir -p "$OVERLAY_DIR"
-		cat > "$OVERLAY_DIR/toolchain.cmake" <<EOF
-set(CMAKE_C_COMPILER "${CC:-cc}" CACHE FILEPATH "" FORCE)
-set(CMAKE_CXX_COMPILER "$CXX" CACHE FILEPATH "" FORCE)
-set(CMAKE_SYSTEM_PROCESSOR arm64 CACHE STRING "" FORCE)
-set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "" FORCE)
-EOF
-		cat > "$OVERLAY_DIR/arm64-osx.cmake" <<EOF
-set(VCPKG_TARGET_ARCHITECTURE arm64)
-set(VCPKG_CRT_LINKAGE dynamic)
-set(VCPKG_LIBRARY_LINKAGE static)
-set(VCPKG_CMAKE_SYSTEM_NAME Darwin)
-set(VCPKG_OSX_ARCHITECTURES arm64)
-set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "$OVERLAY_DIR/toolchain.cmake")
-EOF
-		CMAKE_ARGS+=(-DVCPKG_OVERLAY_TRIPLETS="$OVERLAY_DIR" -DVCPKG_TARGET_TRIPLET=arm64-osx)
+		CMAKE_ARGS+=(-DVCPKG_OVERLAY_TRIPLETS="$SCRIPT_DIR/cmake/vcpkg-triplets" -DVCPKG_TARGET_TRIPLET=arm64-osx)
 		PRESET_OVERLAY=1
 	fi
 fi
 
 # Emit a machine-local CMakeUserPresets.json (gitignored) mirroring the exact
-# configuration above, so IDEs (VS Code / CLion CMake Tools) configure with the
-# same compiler + vcpkg overlay instead of the system Apple clang, which cannot
-# build the C++23 stdlib (macOS SDK libc++ needs __builtin_clzg/__builtin_ctzg,
-# absent in Apple clang). Regenerated every run so paths stay in sync; requires
-# this script to have run once so build/vcpkg-overlay exists.
+# configuration above (absolute vcpkg/compiler paths for this machine). Committed
+# CMakePresets.json already provides a portable "macos-arm64" preset; this just
+# pins the probed compiler + resolved vcpkg toolchain for local IDE convenience.
 CACHE_VARS="\"CMAKE_BUILD_TYPE\": \"${BUILD_TYPE:-Release}\""
 if [ -n "${CXX:-}" ]; then
 	CACHE_VARS="$CACHE_VARS,
@@ -105,7 +88,7 @@ fi
 if [ "${PRESET_OVERLAY:-0}" = "1" ]; then
 	CACHE_VARS="$CACHE_VARS,
 				\"VCPKG_TARGET_TRIPLET\": \"arm64-osx\",
-				\"VCPKG_OVERLAY_TRIPLETS\": \"\${sourceDir}/build/vcpkg-overlay\""
+				\"VCPKG_OVERLAY_TRIPLETS\": \"\${sourceDir}/cmake/vcpkg-triplets\""
 fi
 cat > "$SCRIPT_DIR/CMakeUserPresets.json" <<EOF
 {

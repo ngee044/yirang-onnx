@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <map>
@@ -86,6 +87,78 @@ namespace YirangOnnx
 				out.push_back(ch);
 			}
 			return out;
+		}
+
+		auto initializer_data_json(const onnx::TensorProto& tensor) -> std::optional<boost::json::array>
+		{
+			namespace json = boost::json;
+			json::array values;
+			const std::string& raw = tensor.raw_data();
+			switch (tensor.data_type())
+			{
+			case 1: // FLOAT
+				for (int i = 0; i < tensor.float_data_size(); ++i)
+				{
+					values.push_back(json::value(static_cast<double>(tensor.float_data(i))));
+				}
+				if (tensor.float_data_size() == 0 && tensor.has_raw_data())
+				{
+					for (size_t i = 0; i + sizeof(float) <= raw.size(); i += sizeof(float))
+					{
+						float v;
+						std::memcpy(&v, raw.data() + i, sizeof(float));
+						values.push_back(json::value(static_cast<double>(v)));
+					}
+				}
+				return values;
+			case 11: // DOUBLE
+				for (int i = 0; i < tensor.double_data_size(); ++i)
+				{
+					values.push_back(json::value(tensor.double_data(i)));
+				}
+				if (tensor.double_data_size() == 0 && tensor.has_raw_data())
+				{
+					for (size_t i = 0; i + sizeof(double) <= raw.size(); i += sizeof(double))
+					{
+						double v;
+						std::memcpy(&v, raw.data() + i, sizeof(double));
+						values.push_back(json::value(v));
+					}
+				}
+				return values;
+			case 6: // INT32
+				for (int i = 0; i < tensor.int32_data_size(); ++i)
+				{
+					values.push_back(json::value(static_cast<int64_t>(tensor.int32_data(i))));
+				}
+				if (tensor.int32_data_size() == 0 && tensor.has_raw_data())
+				{
+					for (size_t i = 0; i + sizeof(int32_t) <= raw.size(); i += sizeof(int32_t))
+					{
+						int32_t v;
+						std::memcpy(&v, raw.data() + i, sizeof(int32_t));
+						values.push_back(json::value(static_cast<int64_t>(v)));
+					}
+				}
+				return values;
+			case 7: // INT64
+				for (int i = 0; i < tensor.int64_data_size(); ++i)
+				{
+					values.push_back(json::value(static_cast<int64_t>(tensor.int64_data(i))));
+				}
+				if (tensor.int64_data_size() == 0 && tensor.has_raw_data())
+				{
+					for (size_t i = 0; i + sizeof(int64_t) <= raw.size(); i += sizeof(int64_t))
+					{
+						int64_t v;
+						std::memcpy(&v, raw.data() + i, sizeof(int64_t));
+						values.push_back(json::value(v));
+					}
+				}
+				return values;
+			default:
+				return std::nullopt;
+			}
 		}
 	}
 
@@ -347,7 +420,7 @@ namespace YirangOnnx
 
 	auto OnnxModel::proto(void) const -> const onnx::ModelProto& { return model_; }
 
-	auto OnnxModel::to_json(void) const -> std::string
+	auto OnnxModel::to_json(bool include_initializer_data) const -> std::string
 	{
 		namespace json = boost::json;
 		json::object root;
@@ -448,8 +521,10 @@ namespace YirangOnnx
 		root["nodes"] = std::move(node_array);
 
 		json::array init_array;
-		for (const auto& tensor : initializers())
+		const auto init_list = initializers();
+		for (size_t i = 0; i < init_list.size(); ++i)
 		{
+			const auto& tensor = init_list[i];
 			json::object entry;
 			entry["name"] = tensor.name_;
 			entry["data_type"] = tensor.data_type_;
@@ -461,6 +536,18 @@ namespace YirangOnnx
 			entry["dims"] = std::move(dims);
 			entry["source"] = (tensor.source_ == TensorDataSource::External) ? "external" : "inline";
 			entry["byte_size"] = static_cast<int64_t>(tensor.byte_size_);
+
+			if (include_initializer_data && model_.has_graph())
+			{
+				if (auto data = initializer_data_json(model_.graph().initializer(static_cast<int>(i))); data.has_value())
+				{
+					entry["data"] = std::move(data.value());
+				}
+				else
+				{
+					entry["data_omitted"] = "value export unsupported for this dtype";
+				}
+			}
 			init_array.push_back(std::move(entry));
 		}
 		root["initializers"] = std::move(init_array);

@@ -1,3 +1,4 @@
+#include "File.h"
 #include "OnnxModel.h"
 
 #include "onnx.pb.h"
@@ -7,9 +8,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
+
+using namespace Utilities;
 
 using namespace YirangOnnx;
 
@@ -155,9 +157,9 @@ TEST(OnnxModelTest, LoadsFromFileRoundTrip)
 	}
 
 	{
-		std::ofstream file(path, std::ios::out | std::ios::binary | std::ios::trunc);
-		ASSERT_TRUE(file.is_open());
-		file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		File file;
+		ASSERT_TRUE(file.open(path.string(), std::ios::out | std::ios::binary | std::ios::trunc).has_value());
+		ASSERT_TRUE(file.write_bytes(bytes).has_value());
 	}
 
 	auto [model, error] = OnnxModel::load(path.string());

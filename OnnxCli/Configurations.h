@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 using namespace Utilities;
 
@@ -20,6 +21,9 @@ namespace YirangOnnx
 		auto model_path(void) const -> std::string;
 		auto output_format(void) const -> std::string;
 		auto output_path(void) const -> std::string;
+		auto include_weights(void) const -> bool;
+		auto input_paths(void) const -> std::vector<std::string>;
+		auto output_dir(void) const -> std::string;
 		auto app_title(void) const -> std::string;
 
 		auto log_root_path(void) const -> std::string;
@@ -41,6 +45,9 @@ namespace YirangOnnx
 		std::string model_path_;
 		std::string output_format_;
 		std::string output_path_;
+		bool include_weights_;
+		std::vector<std::string> input_paths_;
+		std::string output_dir_;
 		std::string app_title_;
 
 		std::string log_root_path_;

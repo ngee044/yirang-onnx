@@ -21,6 +21,7 @@ add_subdirectory(.CppToolkit/Utilities)
 option(YIRANG_ONNX_BUILD_TESTS "Build yirang-onnx tests" ON)
 
 add_subdirectory(OnnxParser)
+add_subdirectory(OnnxInference)
 add_subdirectory(OnnxCli)
 
 if(YIRANG_ONNX_BUILD_TESTS)

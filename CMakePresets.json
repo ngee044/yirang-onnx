@@ -1,0 +1,33 @@
+{
+	"version": 3,
+	"cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+	"configurePresets": [
+		{
+			"name": "default",
+			"displayName": "yirang-onnx (Ninja + vcpkg)",
+			"description": "vcpkg at $HOME/vcpkg; uses the default system compiler.",
+			"generator": "Ninja",
+			"binaryDir": "${sourceDir}/build",
+			"toolchainFile": "$env{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Release"
+			}
+		},
+		{
+			"name": "macos-arm64",
+			"inherits": "default",
+			"displayName": "yirang-onnx (macOS arm64 + Homebrew LLVM)",
+			"description": "Prereqs: brew install llvm onnxruntime; vcpkg at $HOME/vcpkg. Builds project + vcpkg ports with Homebrew LLVM clang.",
+			"cacheVariables": {
+				"CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm/bin/clang",
+				"CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++",
+				"VCPKG_TARGET_TRIPLET": "arm64-osx",
+				"VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-triplets"
+			}
+		}
+	],
+	"buildPresets": [
+		{ "name": "default", "configurePreset": "default" },
+		{ "name": "macos-arm64", "configurePreset": "macos-arm64" }
+	]
+}
