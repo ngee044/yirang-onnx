@@ -27,14 +27,14 @@ yirang-onnx는 공식 `onnx.proto` 스키마를 벤더링하고 `protoc`로 C++ 
 - 파일 로드(`OnnxModel::load`) 또는 인메모리 버퍼 파싱(`OnnxModel::parse`).
 - ONNX proto2 스키마(v1.17.0) 기반으로 opset에 무관하게 추출.
 - 3종 출력 포맷: `summary`(텍스트), `json`(분석), `dot`(시각화). `--weights`로 초기화자(가중치) **실제 값**을 JSON에 포함.
-- **추론 엔진**(`OnnxInference`, 별도 라이브러리): ONNX Runtime으로 `.onnx` + 입력 `.pb` → 출력 `.pb`. CMake 옵션으로 on/off(느슨한 결합, MSA 지향).
+- **추론 엔진**(`OnnxInference`, 별도 라이브러리·상시 빌드): ONNX Runtime으로 `.onnx` + 입력 `.pb` → 출력 `.pb`. 파서와 protobuf-free `Tensor` 계약으로만 접점(느슨한 결합, MSA 지향).
 - 파싱/IO 경계에서 오류는 예외를 던지지 않고 반환값으로 표현.
 - 의존성이 가벼운 작은 파사드 — 스키마를 건드리지 않고 새 뷰를 추가하도록 설계.
 
 ## 아키텍처
 
 ```
-OnnxCli (yirang-onnx)  ── Configurations + Logger + main → stdout / 파일
+OnnxCli (yirang-onnx)  ── Configurations + TensorConvert + Logger + main → Logger 콘솔 / 파일
    │ links                    │ links
 OnnxParser (YirangOnnx)     OnnxInference (YirangOnnx)
    │ links                    │ links
@@ -96,15 +96,15 @@ cmake --build build -j
 ## 사용법 (CLI)
 
 ```bash
-# 사람이 읽는 요약 (stdout)
+# 사람이 읽는 요약 (Logger 콘솔 출력)
 build/out/yirang-onnx --model model.onnx
 
 # 분석용 JSON
-build/out/yirang-onnx --model model.onnx --format json
+build/out/yirang-onnx --model model.onnx --format json --out model.json
 
-# Graphviz 시각화
+# Graphviz 시각화 (--out 파일은 로그 접두어 없는 원본 — 그대로 dot에 입력 가능)
 build/out/yirang-onnx --model model.onnx --format dot --out graph.dot
-build/out/yirang-onnx --model model.onnx --format dot | dot -Tsvg -o graph.svg
+dot -Tsvg graph.dot -o graph.svg
 
 # 초기화자(가중치) 실제 값을 JSON에 포함
 build/out/yirang-onnx --model model.onnx --format json --weights true --out params.json
@@ -177,8 +177,9 @@ CMake 타겟 `OnnxParser`를 링크하면 생성된 proto, protobuf, CppToolkit 
 ctest --test-dir build --output-on-failure
 ```
 
-GoogleTest 스위트(`tests/`)는 인메모리로 소형 모델을 만들어 파싱·추출·렌더링과 오류
-경로(빈 버퍼, 부재 파일)를 검증합니다.
+GoogleTest 스위트(`tests/`, 16개)는 파서(인메모리 소형 모델의 파싱·추출·렌더링·오류 경로),
+CLI 설정(`Configurations` 기본값/CLI 파싱/JSON 우선순위/손상 설정 경고),
+TensorProto↔Tensor 변환(`TensorConvert` 왕복/미지원 dtype 거부)을 검증합니다.
 
 ## 디렉터리 레이아웃
 
@@ -186,7 +187,7 @@ GoogleTest 스위트(`tests/`)는 인메모리로 소형 모델을 만들어 파
 yirang-onnx/
 ├── OnnxParser/     # 코어 라이브러리 (OnnxModel 파사드, ModelTypes)
 ├── OnnxInference/  # 추론 엔진 (InferenceEngine, Tensor) — ONNX Runtime
-├── OnnxCli/        # CLI (yirang-onnx): Configurations + main + RunCommand
+├── OnnxCli/        # CLI (yirang-onnx): Configurations + TensorConvert(OnnxCliCore) + RunCommand + main
 ├── tests/          # GoogleTest 스위트
 ├── proto/          # 벤더링된 onnx.proto (ONNX v1.17.0, Apache-2.0)
 ├── .CppToolkit/    # CppToolkit 서브모듈 (Utilities 모듈 사용)

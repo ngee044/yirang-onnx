@@ -69,7 +69,7 @@ namespace
 		model.SerializeToString(&serialized);
 		return std::vector<uint8_t>(serialized.begin(), serialized.end());
 	}
-}
+} // namespace
 
 TEST(OnnxModelTest, ParsesMetadata)
 {

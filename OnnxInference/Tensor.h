@@ -17,4 +17,4 @@ namespace YirangOnnx
 		std::vector<int64_t> shape_;
 		std::vector<uint8_t> data_;
 	};
-}
+} // namespace YirangOnnx

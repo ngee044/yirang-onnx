@@ -13,10 +13,10 @@ namespace YirangOnnx
 	namespace
 	{
 		auto to_log_types(int64_t value) -> LogTypes { return static_cast<LogTypes>(value); }
-	}
+	} // namespace
 
-	Configurations::Configurations(ArgumentParser&& arguments)
-		: config_file_name_("yirang_onnx_configurations.json")
+	Configurations::Configurations(ArgumentParser&& arguments, const std::string& config_file_name)
+		: config_file_name_(config_file_name)
 		, output_format_("summary")
 		, include_weights_(false)
 		, app_title_("yirang-onnx")
@@ -45,6 +45,7 @@ namespace YirangOnnx
 	auto Configurations::write_file(void) const -> LogTypes { return write_file_; }
 	auto Configurations::write_interval(void) const -> uint16_t { return write_interval_; }
 	auto Configurations::invalid_reason(void) const -> std::optional<std::string> { return invalid_reason_; }
+	auto Configurations::load_warning(void) const -> std::optional<std::string> { return load_warning_; }
 
 	auto Configurations::load(void) -> void
 	{
@@ -57,12 +58,14 @@ namespace YirangOnnx
 		File source;
 		if (auto opened = source.open(path.string(), std::ios::in | std::ios::binary); !opened)
 		{
+			load_warning_ = std::format("cannot open configuration '{}': {}", path.string(), opened.error());
 			return;
 		}
 
 		auto read = source.read_bytes();
 		if (!read)
 		{
+			load_warning_ = std::format("cannot read configuration '{}': {}", path.string(), read.error());
 			return;
 		}
 
@@ -71,13 +74,15 @@ namespace YirangOnnx
 		{
 			parsed = boost::json::parse(Converter::to_string(read.value()));
 		}
-		catch (const std::exception&)
+		catch (const std::exception& e)
 		{
+			load_warning_ = std::format("cannot parse configuration '{}': {}", path.string(), e.what());
 			return;
 		}
 
 		if (!parsed.is_object())
 		{
+			load_warning_ = std::format("configuration '{}' is not a JSON object; ignored", path.string());
 			return;
 		}
 		const auto& message = parsed.as_object();
@@ -187,4 +192,4 @@ namespace YirangOnnx
 			return;
 		}
 	}
-}
+} // namespace YirangOnnx

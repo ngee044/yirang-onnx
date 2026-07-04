@@ -96,7 +96,7 @@ namespace YirangOnnx
 			const std::string& raw = tensor.raw_data();
 			switch (tensor.data_type())
 			{
-			case 1: // FLOAT
+			case onnx::TensorProto::FLOAT:
 				for (int i = 0; i < tensor.float_data_size(); ++i)
 				{
 					values.push_back(json::value(static_cast<double>(tensor.float_data(i))));
@@ -111,7 +111,7 @@ namespace YirangOnnx
 					}
 				}
 				return values;
-			case 11: // DOUBLE
+			case onnx::TensorProto::DOUBLE:
 				for (int i = 0; i < tensor.double_data_size(); ++i)
 				{
 					values.push_back(json::value(tensor.double_data(i)));
@@ -126,7 +126,7 @@ namespace YirangOnnx
 					}
 				}
 				return values;
-			case 6: // INT32
+			case onnx::TensorProto::INT32:
 				for (int i = 0; i < tensor.int32_data_size(); ++i)
 				{
 					values.push_back(json::value(static_cast<int64_t>(tensor.int32_data(i))));
@@ -141,7 +141,7 @@ namespace YirangOnnx
 					}
 				}
 				return values;
-			case 7: // INT64
+			case onnx::TensorProto::INT64:
 				for (int i = 0; i < tensor.int64_data_size(); ++i)
 				{
 					values.push_back(json::value(static_cast<int64_t>(tensor.int64_data(i))));
@@ -160,57 +160,57 @@ namespace YirangOnnx
 				return std::nullopt;
 			}
 		}
-	}
+	} // namespace
 
 	auto data_type_name(int32_t data_type) -> std::string
 	{
 		switch (data_type)
 		{
-		case 0:
+		case onnx::TensorProto::UNDEFINED:
 			return "UNDEFINED";
-		case 1:
+		case onnx::TensorProto::FLOAT:
 			return "FLOAT";
-		case 2:
+		case onnx::TensorProto::UINT8:
 			return "UINT8";
-		case 3:
+		case onnx::TensorProto::INT8:
 			return "INT8";
-		case 4:
+		case onnx::TensorProto::UINT16:
 			return "UINT16";
-		case 5:
+		case onnx::TensorProto::INT16:
 			return "INT16";
-		case 6:
+		case onnx::TensorProto::INT32:
 			return "INT32";
-		case 7:
+		case onnx::TensorProto::INT64:
 			return "INT64";
-		case 8:
+		case onnx::TensorProto::STRING:
 			return "STRING";
-		case 9:
+		case onnx::TensorProto::BOOL:
 			return "BOOL";
-		case 10:
+		case onnx::TensorProto::FLOAT16:
 			return "FLOAT16";
-		case 11:
+		case onnx::TensorProto::DOUBLE:
 			return "DOUBLE";
-		case 12:
+		case onnx::TensorProto::UINT32:
 			return "UINT32";
-		case 13:
+		case onnx::TensorProto::UINT64:
 			return "UINT64";
-		case 14:
+		case onnx::TensorProto::COMPLEX64:
 			return "COMPLEX64";
-		case 15:
+		case onnx::TensorProto::COMPLEX128:
 			return "COMPLEX128";
-		case 16:
+		case onnx::TensorProto::BFLOAT16:
 			return "BFLOAT16";
-		case 17:
+		case onnx::TensorProto::FLOAT8E4M3FN:
 			return "FLOAT8E4M3FN";
-		case 18:
+		case onnx::TensorProto::FLOAT8E4M3FNUZ:
 			return "FLOAT8E4M3FNUZ";
-		case 19:
+		case onnx::TensorProto::FLOAT8E5M2:
 			return "FLOAT8E5M2";
-		case 20:
+		case onnx::TensorProto::FLOAT8E5M2FNUZ:
 			return "FLOAT8E5M2FNUZ";
-		case 21:
+		case onnx::TensorProto::UINT4:
 			return "UINT4";
-		case 22:
+		case onnx::TensorProto::INT4:
 			return "INT4";
 		default:
 			return std::format("UNKNOWN({})", data_type);
@@ -630,4 +630,4 @@ namespace YirangOnnx
 		}
 		return out.str();
 	}
-}
+} // namespace YirangOnnx

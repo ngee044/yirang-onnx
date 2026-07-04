@@ -18,4 +18,4 @@ namespace YirangOnnx
 
 		auto run(const std::string& model_path, const std::vector<Tensor>& inputs) const -> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>;
 	};
-}
+} // namespace YirangOnnx

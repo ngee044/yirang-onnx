@@ -7,7 +7,6 @@
 #include "RunCommand.h"
 
 #include <format>
-#include <iostream>
 #include <memory>
 #include <string>
 
@@ -36,7 +35,7 @@ namespace
 		}
 		return model.to_summary();
 	}
-}
+} // namespace
 
 auto main(int argc, char* argv[]) -> int
 {
@@ -48,6 +47,11 @@ auto main(int argc, char* argv[]) -> int
 	Logger::handle().log_root(configurations->log_root_path());
 
 	Logger::handle().start(configurations->app_title());
+
+	if (auto warning = configurations->load_warning(); warning.has_value())
+	{
+		Logger::handle().write(LogTypes::Warning, warning.value());
+	}
 
 	int exit_code = 0;
 
@@ -73,7 +77,7 @@ auto main(int argc, char* argv[]) -> int
 
 		if (out_path.empty())
 		{
-			std::cout << rendered;
+			Logger::handle().write(LogTypes::Information, rendered);
 		}
 		else
 		{

@@ -36,4 +36,4 @@ namespace YirangOnnx
 	private:
 		onnx::ModelProto model_;
 	};
-}
+} // namespace YirangOnnx

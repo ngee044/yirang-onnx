@@ -5,12 +5,12 @@
 #include "Logger.h"
 #include "ModelTypes.h"
 #include "Tensor.h"
+#include "TensorConvert.h"
 
 #include "onnx.pb.h"
 
 #include <filesystem>
 #include <format>
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -20,88 +20,16 @@ namespace YirangOnnx
 {
 	namespace
 	{
-		auto tensor_from_proto(const onnx::TensorProto& proto) -> Tensor
-		{
-			Tensor tensor;
-			tensor.name_ = proto.name();
-			tensor.elem_type_ = proto.data_type();
-			for (int i = 0; i < proto.dims_size(); ++i)
-			{
-				tensor.shape_.push_back(proto.dims(i));
-			}
-
-			if (proto.has_raw_data())
-			{
-				const std::string& raw = proto.raw_data();
-				tensor.data_.assign(raw.begin(), raw.end());
-				return tensor;
-			}
-
-			const auto append = [&tensor](const void* source, size_t bytes)
-			{
-				const uint8_t* begin = reinterpret_cast<const uint8_t*>(source);
-				tensor.data_.insert(tensor.data_.end(), begin, begin + bytes);
-			};
-			switch (proto.data_type())
-			{
-			case 1: // FLOAT
-				for (int i = 0; i < proto.float_data_size(); ++i)
-				{
-					float v = proto.float_data(i);
-					append(&v, sizeof(v));
-				}
-				break;
-			case 11: // DOUBLE
-				for (int i = 0; i < proto.double_data_size(); ++i)
-				{
-					double v = proto.double_data(i);
-					append(&v, sizeof(v));
-				}
-				break;
-			case 6: // INT32
-				for (int i = 0; i < proto.int32_data_size(); ++i)
-				{
-					int32_t v = proto.int32_data(i);
-					append(&v, sizeof(v));
-				}
-				break;
-			case 7: // INT64
-				for (int i = 0; i < proto.int64_data_size(); ++i)
-				{
-					int64_t v = proto.int64_data(i);
-					append(&v, sizeof(v));
-				}
-				break;
-			default:
-				break;
-			}
-			return tensor;
-		}
-
-		auto proto_from_tensor(const Tensor& tensor) -> onnx::TensorProto
-		{
-			onnx::TensorProto proto;
-			proto.set_name(tensor.name_);
-			proto.set_data_type(tensor.elem_type_);
-			for (int64_t dim : tensor.shape_)
-			{
-				proto.add_dims(dim);
-			}
-			proto.set_raw_data(tensor.data_.data(), tensor.data_.size());
-			return proto;
-		}
-
 		auto shape_string(const std::vector<int64_t>& shape) -> std::string
 		{
-			std::string out = "[";
+			std::string joined;
 			for (size_t i = 0; i < shape.size(); ++i)
 			{
-				out += (i == 0 ? "" : ", ") + std::to_string(shape[i]);
+				joined += std::format("{}{}", (i == 0 ? "" : ", "), shape[i]);
 			}
-			out += "]";
-			return out;
+			return std::format("[{}]", joined);
 		}
-	}
+	} // namespace
 
 	auto run_inference(const std::string& model_path, const std::vector<std::string>& input_paths, const std::string& output_dir) -> int
 	{
@@ -133,7 +61,14 @@ namespace YirangOnnx
 				Logger::handle().write(LogTypes::Error, std::format("input tensor '{}' has no name (must match a graph input)", path));
 				return 1;
 			}
-			inputs.push_back(tensor_from_proto(proto));
+
+			auto [tensor, convert_error] = tensor_from_proto(proto);
+			if (!tensor.has_value())
+			{
+				Logger::handle().write(LogTypes::Error, std::format("input tensor '{}': {}", path, convert_error.value_or("conversion failed")));
+				return 1;
+			}
+			inputs.push_back(std::move(tensor.value()));
 		}
 
 		const InferenceEngine engine;
@@ -157,7 +92,7 @@ namespace YirangOnnx
 					ch = '_';
 				}
 			}
-			const std::filesystem::path out_path = dir / (safe_name + ".pb");
+			const std::filesystem::path out_path = dir / std::format("{}.pb", safe_name);
 
 			const onnx::TensorProto proto = proto_from_tensor(output);
 			std::string serialized;
@@ -175,9 +110,9 @@ namespace YirangOnnx
 				return 1;
 			}
 
-			std::cout << "output " << output.name_ << " " << shape_string(output.shape_) << " " << data_type_name(output.elem_type_) << " -> " << out_path.string()
-					  << '\n';
+			Logger::handle().write(LogTypes::Information,
+								   std::format("output {} {} {} -> {}", output.name_, shape_string(output.shape_), data_type_name(output.elem_type_), out_path.string()));
 		}
 		return 0;
 	}
-}
+} // namespace YirangOnnx

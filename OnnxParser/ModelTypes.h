@@ -67,4 +67,4 @@ namespace YirangOnnx
 	};
 
 	auto data_type_name(int32_t data_type) -> std::string;
-}
+} // namespace YirangOnnx

@@ -33,7 +33,7 @@ namespace YirangOnnx
 				return 0; // unsupported (e.g. STRING)
 			}
 		}
-	}
+	} // namespace
 
 	auto InferenceEngine::run(const std::string& model_path, const std::vector<Tensor>& inputs) const
 		-> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>
@@ -86,6 +86,10 @@ namespace YirangOnnx
 				const auto shape = info.GetShape();
 				const int32_t elem_type = static_cast<int32_t>(info.GetElementType());
 				const size_t elem = element_size(elem_type);
+				if (elem == 0)
+				{
+					return { std::nullopt, std::format("output '{}': unsupported data_type {}", output_names_str[i], elem_type) };
+				}
 
 				Tensor out;
 				out.name_ = output_names_str[i];
@@ -107,4 +111,4 @@ namespace YirangOnnx
 			return { std::nullopt, std::format("inference failed: {}", e.what()) };
 		}
 	}
-}
+} // namespace YirangOnnx

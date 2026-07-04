@@ -15,7 +15,7 @@ namespace YirangOnnx
 	class Configurations
 	{
 	public:
-		Configurations(ArgumentParser&& arguments);
+		Configurations(ArgumentParser&& arguments, const std::string& config_file_name = "yirang_onnx_configurations.json");
 		virtual ~Configurations(void);
 
 		auto model_path(void) const -> std::string;
@@ -32,6 +32,7 @@ namespace YirangOnnx
 		auto write_interval(void) const -> uint16_t;
 
 		auto invalid_reason(void) const -> std::optional<std::string>;
+		auto load_warning(void) const -> std::optional<std::string>;
 
 	protected:
 		auto load(void) -> void;
@@ -56,5 +57,6 @@ namespace YirangOnnx
 		uint16_t write_interval_;
 
 		std::optional<std::string> invalid_reason_;
+		std::optional<std::string> load_warning_;
 	};
-}
+} // namespace YirangOnnx
