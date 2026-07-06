@@ -1,8 +1,6 @@
 {
-	"_comment": "Copy next to the binary as 'yirang_onnx_configurations.json'; CLI args override. write_console/write_file are LogTypes ints (0=None); keep write_console 0 for clean stdout.",
+	"_comment": "Copy next to the binary as 'yirang_onnx_configurations.json'. Static engine settings only (logging/title); job-level values live in input_project.json (--input-script) or CLI args. write_console/write_file are LogTypes ints (0=None).",
 	"app_title": "yirang-onnx",
-	"output_format": "summary",
-	"include_weights": false,
 	"log_root_path": "logs/",
 	"write_console": 0,
 	"write_file": 0,

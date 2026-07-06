@@ -97,19 +97,40 @@ TEST(ConfigurationsTest, RejectsUnknownFormat)
 	EXPECT_NE(configurations.invalid_reason()->find("yaml"), std::string::npos);
 }
 
-TEST(ConfigurationsTest, LoadsJsonAndCliTakesPrecedence)
+TEST(ConfigurationsTest, LoadsEngineSettingsAndIgnoresJobKeys)
 {
 	const std::string config_name = "onnx_parser_tests_configurations.json";
-	ScopedConfigFile config(config_name, R"({ "output_format": "dot", "app_title": "from-json" })");
+	ScopedConfigFile config(config_name, R"({ "app_title": "from-json", "write_interval": 500, "output_format": "dot", "model_path": "ignored.onnx" })");
 
 	Configurations from_json(make_parser({ "--model", "model.onnx" }), config_name);
-	EXPECT_EQ(from_json.output_format(), "dot");
 	EXPECT_EQ(from_json.app_title(), "from-json");
+	EXPECT_EQ(from_json.write_interval(), 500);
+	EXPECT_EQ(from_json.output_format(), "summary");
+	EXPECT_EQ(from_json.model_path(), "model.onnx");
 	EXPECT_FALSE(from_json.load_warning().has_value());
 
-	Configurations overridden(make_parser({ "--model", "model.onnx", "--format", "json" }), config_name);
-	EXPECT_EQ(overridden.output_format(), "json");
-	EXPECT_EQ(overridden.app_title(), "from-json");
+	Configurations overridden(make_parser({ "--model", "model.onnx", "--title", "from-cli" }), config_name);
+	EXPECT_EQ(overridden.app_title(), "from-cli");
+}
+
+TEST(ConfigurationsTest, AcceptsInputScriptWithoutModel)
+{
+	Configurations configurations(make_parser({ "--input-script", "input_project.json" }), missing_config);
+
+	EXPECT_FALSE(configurations.invalid_reason().has_value());
+	EXPECT_EQ(configurations.input_script(), "input_project.json");
+	EXPECT_TRUE(configurations.model_path().empty());
+}
+
+TEST(ConfigurationsTest, HelpAndVersionSkipValidation)
+{
+	Configurations help(make_parser({ "--help" }), missing_config);
+	EXPECT_TRUE(help.show_help());
+	EXPECT_FALSE(help.invalid_reason().has_value());
+
+	Configurations version(make_parser({ "--version" }), missing_config);
+	EXPECT_TRUE(version.show_version());
+	EXPECT_FALSE(version.invalid_reason().has_value());
 }
 
 TEST(ConfigurationsTest, WarnsOnBrokenJson)

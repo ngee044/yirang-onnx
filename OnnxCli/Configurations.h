@@ -24,7 +24,11 @@ namespace YirangOnnx
 		auto include_weights(void) const -> bool;
 		auto input_paths(void) const -> std::vector<std::string>;
 		auto output_dir(void) const -> std::string;
+		auto input_script(void) const -> std::string;
 		auto app_title(void) const -> std::string;
+
+		auto show_help(void) const -> bool;
+		auto show_version(void) const -> bool;
 
 		auto log_root_path(void) const -> std::string;
 		auto write_console(void) const -> LogTypes;
@@ -49,7 +53,11 @@ namespace YirangOnnx
 		bool include_weights_;
 		std::vector<std::string> input_paths_;
 		std::string output_dir_;
+		std::string input_script_;
 		std::string app_title_;
+
+		bool show_help_;
+		bool show_version_;
 
 		std::string log_root_path_;
 		LogTypes write_console_;

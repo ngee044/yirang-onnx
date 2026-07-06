@@ -1,15 +1,19 @@
 set(EXECUTABLE_NAME OnnxCli)
 
-project(${EXECUTABLE_NAME} VERSION 0.1.0 LANGUAGES CXX)
+project(${EXECUTABLE_NAME} VERSION 0.2.0 LANGUAGES CXX)
 
 set(CORE_LIBRARY_NAME OnnxCliCore)
 
 set(CORE_HEADER_FILES
 	Configurations.h
+	InputBuilder.h
+	InputProject.h
 	TensorConvert.h)
 
 set(CORE_SOURCE_FILES
 	Configurations.cpp
+	InputBuilder.cpp
+	InputProject.cpp
 	TensorConvert.cpp)
 
 add_library(${CORE_LIBRARY_NAME} STATIC ${CORE_HEADER_FILES} ${CORE_SOURCE_FILES})
@@ -27,6 +31,7 @@ add_executable(${EXECUTABLE_NAME} ${HEADER_FILES} ${SOURCE_FILES})
 set_target_properties(${EXECUTABLE_NAME} PROPERTIES OUTPUT_NAME yirang-onnx)
 
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${CORE_LIBRARY_NAME})
+target_compile_definitions(${EXECUTABLE_NAME} PRIVATE YIRANG_ONNX_VERSION="${PROJECT_VERSION}")
 
 set(JSON_FILES
 	yirang_onnx_configurations.json

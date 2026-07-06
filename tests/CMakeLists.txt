@@ -5,6 +5,9 @@ find_package(GTest CONFIG REQUIRED)
 add_executable(onnx_parser_tests
 	OnnxModelTests.cpp
 	ConfigurationsTests.cpp
+	InputProjectTests.cpp
+	InputBuilderTests.cpp
+	InferenceEngineTests.cpp
 	TensorConvertTests.cpp)
 target_link_libraries(onnx_parser_tests PRIVATE OnnxParser OnnxCliCore GTest::gtest GTest::gtest_main)
 

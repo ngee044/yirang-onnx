@@ -69,6 +69,105 @@ namespace
 		model.SerializeToString(&serialized);
 		return std::vector<uint8_t>(serialized.begin(), serialized.end());
 	}
+
+	auto build_attribute_model(void) -> std::vector<uint8_t>
+	{
+		onnx::ModelProto model;
+		model.set_ir_version(9);
+		auto* graph = model.mutable_graph();
+		graph->set_name("attribute_graph");
+
+		auto* conv = graph->add_node();
+		conv->set_op_type("Conv");
+		conv->set_name("conv0");
+		conv->add_input("X");
+		conv->add_output("Y");
+
+		auto* kernel = conv->add_attribute();
+		kernel->set_name("kernel_shape");
+		kernel->set_type(onnx::AttributeProto::INTS);
+		kernel->add_ints(3);
+		kernel->add_ints(3);
+
+		auto* alpha = conv->add_attribute();
+		alpha->set_name("alpha");
+		alpha->set_type(onnx::AttributeProto::FLOAT);
+		alpha->set_f(0.5f);
+
+		auto* mode = conv->add_attribute();
+		mode->set_name("mode");
+		mode->set_type(onnx::AttributeProto::STRING);
+		mode->set_s("constant");
+
+		std::string serialized;
+		model.SerializeToString(&serialized);
+		return std::vector<uint8_t>(serialized.begin(), serialized.end());
+	}
+
+	auto build_subgraph_model(void) -> std::vector<uint8_t>
+	{
+		onnx::ModelProto model;
+		model.set_ir_version(9);
+		auto* graph = model.mutable_graph();
+		graph->set_name("subgraph_graph");
+
+		auto* if_node = graph->add_node();
+		if_node->set_op_type("If");
+		if_node->set_name("if0");
+		if_node->add_input("cond");
+		if_node->add_output("out");
+
+		auto* then_branch = if_node->add_attribute();
+		then_branch->set_name("then_branch");
+		then_branch->set_type(onnx::AttributeProto::GRAPH);
+		auto* then_graph = then_branch->mutable_g();
+		then_graph->set_name("then_graph");
+		auto* then_relu = then_graph->add_node();
+		then_relu->set_op_type("Relu");
+		then_relu->add_input("A");
+		then_relu->add_output("B");
+
+		auto* else_branch = if_node->add_attribute();
+		else_branch->set_name("else_branch");
+		else_branch->set_type(onnx::AttributeProto::GRAPH);
+		auto* else_graph = else_branch->mutable_g();
+		else_graph->set_name("else_graph");
+		auto* else_sigmoid = else_graph->add_node();
+		else_sigmoid->set_op_type("Sigmoid");
+		else_sigmoid->add_input("A");
+		else_sigmoid->add_output("B");
+
+		std::string serialized;
+		model.SerializeToString(&serialized);
+		return std::vector<uint8_t>(serialized.begin(), serialized.end());
+	}
+
+	auto build_external_model(void) -> std::vector<uint8_t>
+	{
+		onnx::ModelProto model;
+		model.set_ir_version(9);
+		auto* graph = model.mutable_graph();
+		graph->set_name("external_graph");
+
+		auto* weight = graph->add_initializer();
+		weight->set_name("W_ext");
+		weight->set_data_type(1); // FLOAT
+		weight->add_dims(4);
+		weight->set_data_location(onnx::TensorProto::EXTERNAL);
+		auto* location = weight->add_external_data();
+		location->set_key("location");
+		location->set_value("weights.bin");
+		auto* offset = weight->add_external_data();
+		offset->set_key("offset");
+		offset->set_value("0");
+		auto* length = weight->add_external_data();
+		length->set_key("length");
+		length->set_value("16");
+
+		std::string serialized;
+		model.SerializeToString(&serialized);
+		return std::vector<uint8_t>(serialized.begin(), serialized.end());
+	}
 } // namespace
 
 TEST(OnnxModelTest, ParsesMetadata)
@@ -112,10 +211,12 @@ TEST(OnnxModelTest, ExtractsInitializersAndIo)
 	ASSERT_EQ(initializers[0].dims_.size(), 2u);
 	EXPECT_EQ(initializers[0].byte_size_, 4u * sizeof(float));
 	EXPECT_EQ(initializers[0].source_, TensorDataSource::Inline);
+	EXPECT_EQ(initializers[0].element_count(), 4u);
 
 	EXPECT_EQ(model->inputs().size(), 1u);
 	EXPECT_EQ(model->outputs().size(), 1u);
 	EXPECT_EQ(model->inputs()[0].data_type_, "FLOAT");
+	EXPECT_EQ(model->inputs()[0].elem_type_, 1);
 	ASSERT_EQ(model->inputs()[0].shape_.size(), 2u);
 	EXPECT_EQ(model->inputs()[0].shape_[1], "N");
 }
@@ -128,10 +229,107 @@ TEST(OnnxModelTest, RendersJsonAndDot)
 	const auto json = model->to_json();
 	EXPECT_NE(json.find("MatMul"), std::string::npos);
 	EXPECT_NE(json.find("test_graph"), std::string::npos);
+	EXPECT_NE(json.find("total_parameters"), std::string::npos);
 
 	const auto dot = model->to_dot();
 	EXPECT_NE(dot.find("digraph"), std::string::npos);
 	EXPECT_NE(dot.find("->"), std::string::npos);
+}
+
+TEST(OnnxModelTest, DotIncludesGraphIo)
+{
+	auto [model, error] = OnnxModel::parse(build_sample_model());
+	ASSERT_TRUE(model.has_value());
+
+	const auto dot = model->to_dot();
+	EXPECT_NE(dot.find("gi0"), std::string::npos);
+	EXPECT_NE(dot.find("go0"), std::string::npos);
+	EXPECT_NE(dot.find("gi0 -> n0"), std::string::npos);
+	EXPECT_NE(dot.find("n1 -> go0"), std::string::npos);
+	EXPECT_NE(dot.find("FLOAT [1, N]"), std::string::npos);
+}
+
+TEST(OnnxModelTest, SummaryHasParameterTotals)
+{
+	auto [model, error] = OnnxModel::parse(build_sample_model());
+	ASSERT_TRUE(model.has_value());
+
+	const auto summary = model->to_summary();
+	EXPECT_NE(summary.find("parameters    : 4 (16 B)"), std::string::npos);
+}
+
+TEST(OnnxModelTest, ExtractsAttributeValues)
+{
+	auto [model, error] = OnnxModel::parse(build_attribute_model());
+	ASSERT_TRUE(model.has_value()) << error.value_or("");
+
+	const auto nodes = model->nodes();
+	ASSERT_EQ(nodes.size(), 1u);
+	ASSERT_EQ(nodes[0].attributes_.size(), 3u);
+
+	const auto& kernel = nodes[0].attributes_[0];
+	EXPECT_EQ(kernel.name_, "kernel_shape");
+	EXPECT_EQ(kernel.type_, "INTS");
+	ASSERT_EQ(kernel.ints_.size(), 2u);
+	EXPECT_EQ(kernel.ints_[0], 3);
+	EXPECT_EQ(kernel.value_, "[3, 3]");
+
+	const auto& alpha = nodes[0].attributes_[1];
+	EXPECT_EQ(alpha.type_, "FLOAT");
+	ASSERT_EQ(alpha.floats_.size(), 1u);
+	EXPECT_DOUBLE_EQ(alpha.floats_[0], 0.5);
+
+	const auto& mode = nodes[0].attributes_[2];
+	EXPECT_EQ(mode.type_, "STRING");
+	EXPECT_EQ(mode.value_, "constant");
+
+	const auto json = model->to_json();
+	EXPECT_NE(json.find("kernel_shape"), std::string::npos);
+	EXPECT_NE(json.find("constant"), std::string::npos);
+}
+
+TEST(OnnxModelTest, AggregatesSubgraphNodes)
+{
+	auto [model, error] = OnnxModel::parse(build_subgraph_model());
+	ASSERT_TRUE(model.has_value()) << error.value_or("");
+
+	const auto nodes = model->nodes();
+	ASSERT_EQ(nodes.size(), 1u);
+	EXPECT_EQ(nodes[0].subgraph_node_count_, 2u);
+	ASSERT_EQ(nodes[0].attributes_.size(), 2u);
+	EXPECT_EQ(nodes[0].attributes_[0].type_, "GRAPH");
+	EXPECT_NE(nodes[0].attributes_[0].value_.find("then_graph"), std::string::npos);
+
+	const auto histogram = model->operator_histogram();
+	ASSERT_EQ(histogram.size(), 3u);
+
+	const auto summary = model->to_summary();
+	EXPECT_NE(summary.find("(+2 in subgraphs)"), std::string::npos);
+}
+
+TEST(OnnxModelTest, ReportsExternalInitializerMetadata)
+{
+	auto [model, error] = OnnxModel::parse(build_external_model());
+	ASSERT_TRUE(model.has_value()) << error.value_or("");
+
+	const auto initializers = model->initializers();
+	ASSERT_EQ(initializers.size(), 1u);
+	EXPECT_EQ(initializers[0].source_, TensorDataSource::External);
+	EXPECT_EQ(initializers[0].byte_size_, 16u);
+	ASSERT_EQ(initializers[0].external_data_.size(), 3u);
+	EXPECT_EQ(initializers[0].external_data_[0].key_, "location");
+	EXPECT_EQ(initializers[0].external_data_[0].value_, "weights.bin");
+
+	const auto json = model->to_json();
+	EXPECT_NE(json.find("weights.bin"), std::string::npos);
+}
+
+TEST(OnnxModelTest, MapsDataTypeNamesToIds)
+{
+	EXPECT_EQ(data_type_id("FLOAT"), std::optional<int32_t>(1));
+	EXPECT_EQ(data_type_id("int64"), std::optional<int32_t>(7));
+	EXPECT_EQ(data_type_id("BFLOAT16"), std::optional<int32_t>(16));
+	EXPECT_FALSE(data_type_id("NOPE").has_value());
 }
 
 TEST(OnnxModelTest, RejectsEmptyBuffer)

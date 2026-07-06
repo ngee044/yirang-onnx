@@ -1,12 +1,22 @@
 #pragma once
 
+#include "InputProject.h"
+#include "OnnxModel.h"
+
+#include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
 namespace YirangOnnx
 {
-	// Reads input tensors (ONNX TensorProto .pb), runs the model via the inference
-	// engine, writes each output as <output_dir>/<name>.pb, prints a summary.
-	// Returns a process exit code (0 success).
-	auto run_inference(const std::string& model_path, const std::vector<std::string>& input_paths, const std::string& output_dir) -> int;
+	struct InferenceJob
+	{
+		std::vector<InputSpec> inputs_;
+		std::map<std::string, int64_t> dim_overrides_;
+		RunSpec run_;
+		OutputSpec outputs_;
+	};
+
+	auto run_inference(const OnnxModel& model, const std::string& model_path, const InferenceJob& job) -> int;
 } // namespace YirangOnnx

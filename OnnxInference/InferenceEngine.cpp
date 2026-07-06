@@ -35,16 +35,54 @@ namespace YirangOnnx
 		}
 	} // namespace
 
-	auto InferenceEngine::run(const std::string& model_path, const std::vector<Tensor>& inputs) const
-		-> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>
+	struct InferenceEngine::Backend
 	{
+		Ort::Env env_{ ORT_LOGGING_LEVEL_WARNING, "yirang-onnx" };
+		std::optional<Ort::Session> session_;
+	};
+
+	InferenceEngine::InferenceEngine(void) : backend_(std::make_unique<Backend>()) {}
+
+	InferenceEngine::~InferenceEngine(void) = default;
+
+	InferenceEngine::InferenceEngine(InferenceEngine&&) noexcept = default;
+
+	auto InferenceEngine::operator=(InferenceEngine&&) noexcept -> InferenceEngine& = default;
+
+	auto InferenceEngine::load(const std::string& model_path) -> std::expected<void, std::string>
+	{
+		try
+		{
+			Ort::SessionOptions session_options;
+			backend_->session_.emplace(backend_->env_, model_path.c_str(), session_options);
+			return {};
+		}
+		catch (const Ort::Exception& e)
+		{
+			backend_->session_.reset();
+			return std::unexpected(std::format("cannot load model '{}': {}", model_path, e.what()));
+		}
+		catch (const std::exception& e)
+		{
+			backend_->session_.reset();
+			return std::unexpected(std::format("cannot load model '{}': {}", model_path, e.what()));
+		}
+	}
+
+	auto InferenceEngine::loaded(void) const -> bool { return backend_ != nullptr && backend_->session_.has_value(); }
+
+	auto InferenceEngine::run(const std::vector<Tensor>& inputs) const -> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>
+	{
+		if (!loaded())
+		{
+			return { std::nullopt, "no model loaded (call load() first)" };
+		}
+
 		// ORT's ONNXTensorElementDataType enum shares the numbering of ONNX
 		// TensorProto.DataType, so elem_type_ casts across directly.
 		try
 		{
-			Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "yirang-onnx");
-			Ort::SessionOptions session_options;
-			Ort::Session session(env, model_path.c_str(), session_options);
+			Ort::Session& session = backend_->session_.value();
 			Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
 			std::vector<Ort::Value> input_values;

@@ -1,0 +1,12 @@
+{
+	"_comment": "Job script for 'yirang-onnx --input-script <this file>'. Dynamic run variables live here and win over CLI args. 'inputs' entries: a path string, {name,path}, or {name,random{data_type,shape,seed}}; omit 'inputs' to random-generate every graph input.",
+	"model": "models/denoiser.onnx",
+	"inspect": { "format": "summary" },
+	"inputs": [
+		{ "name": "audio", "path": "tensors/audio_chunk.pb" },
+		{ "name": "mask", "random": { "data_type": "FLOAT", "shape": [1, 257], "seed": 42 } }
+	],
+	"dim_overrides": { "N": 1 },
+	"run": { "repeat": 10, "warmup": 2 },
+	"outputs": { "dir": "outputs", "save": true, "dump_json": false, "stats": true }
+}

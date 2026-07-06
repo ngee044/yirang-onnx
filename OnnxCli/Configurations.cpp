@@ -20,6 +20,8 @@ namespace YirangOnnx
 		, output_format_("summary")
 		, include_weights_(false)
 		, app_title_("yirang-onnx")
+		, show_help_(false)
+		, show_version_(false)
 		, write_console_(LogTypes::Information)
 		, write_file_(LogTypes::Information)
 		, write_interval_(1000)
@@ -39,7 +41,10 @@ namespace YirangOnnx
 	auto Configurations::include_weights(void) const -> bool { return include_weights_; }
 	auto Configurations::input_paths(void) const -> std::vector<std::string> { return input_paths_; }
 	auto Configurations::output_dir(void) const -> std::string { return output_dir_; }
+	auto Configurations::input_script(void) const -> std::string { return input_script_; }
 	auto Configurations::app_title(void) const -> std::string { return app_title_; }
+	auto Configurations::show_help(void) const -> bool { return show_help_; }
+	auto Configurations::show_version(void) const -> bool { return show_version_; }
 	auto Configurations::log_root_path(void) const -> std::string { return log_root_path_; }
 	auto Configurations::write_console(void) const -> LogTypes { return write_console_; }
 	auto Configurations::write_file(void) const -> LogTypes { return write_file_; }
@@ -87,22 +92,6 @@ namespace YirangOnnx
 		}
 		const auto& message = parsed.as_object();
 
-		if (message.contains("model_path") && message.at("model_path").is_string())
-		{
-			model_path_ = message.at("model_path").as_string().c_str();
-		}
-		if (message.contains("output_format") && message.at("output_format").is_string())
-		{
-			output_format_ = message.at("output_format").as_string().c_str();
-		}
-		if (message.contains("output_path") && message.at("output_path").is_string())
-		{
-			output_path_ = message.at("output_path").as_string().c_str();
-		}
-		if (message.contains("include_weights") && message.at("include_weights").is_bool())
-		{
-			include_weights_ = message.at("include_weights").as_bool();
-		}
 		if (message.contains("app_title") && message.at("app_title").is_string())
 		{
 			app_title_ = message.at("app_title").as_string().c_str();
@@ -151,6 +140,10 @@ namespace YirangOnnx
 		{
 			output_dir_ = value.value();
 		}
+		if (auto value = arguments.to_string("--input-script"); value.has_value())
+		{
+			input_script_ = value.value();
+		}
 		if (auto value = arguments.to_string("--title"); value.has_value())
 		{
 			app_title_ = value.value();
@@ -171,6 +164,9 @@ namespace YirangOnnx
 		{
 			write_interval_ = value.value();
 		}
+
+		show_help_ = arguments.to_string("--help").has_value();
+		show_version_ = arguments.to_string("--version").has_value();
 	}
 
 	auto Configurations::validate(void) -> void
@@ -180,15 +176,20 @@ namespace YirangOnnx
 			write_interval_ = 100;
 		}
 
+		if (show_help_ || show_version_)
+		{
+			return;
+		}
+
 		if (output_format_ != "summary" && output_format_ != "json" && output_format_ != "dot")
 		{
 			invalid_reason_ = std::format("unknown --format '{}' (expected summary|json|dot)", output_format_);
 			return;
 		}
 
-		if (model_path_.empty())
+		if (model_path_.empty() && input_script_.empty())
 		{
-			invalid_reason_ = "no --model <path.onnx> provided";
+			invalid_reason_ = "no --model <path.onnx> or --input-script <project.json> provided";
 			return;
 		}
 	}

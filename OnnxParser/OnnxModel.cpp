@@ -4,6 +4,8 @@
 #include "JsonTool.h"
 
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -12,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include <boost/json.hpp>
@@ -22,6 +25,8 @@ namespace YirangOnnx
 {
 	namespace
 	{
+		constexpr size_t attribute_preview_limit = 16;
+
 		auto to_value_info(const onnx::ValueInfoProto& value) -> ValueInfo
 		{
 			ValueInfo info;
@@ -30,6 +35,7 @@ namespace YirangOnnx
 			{
 				const auto& tensor = value.type().tensor_type();
 				info.data_type_ = data_type_name(tensor.elem_type());
+				info.elem_type_ = tensor.elem_type();
 				if (tensor.has_shape())
 				{
 					const auto& shape = tensor.shape();
@@ -89,6 +95,230 @@ namespace YirangOnnx
 			return out;
 		}
 
+		auto human_bytes(size_t bytes) -> std::string
+		{
+			constexpr double kib = 1024.0;
+			const double value = static_cast<double>(bytes);
+			if (value >= kib * kib * kib)
+			{
+				return std::format("{:.2f} GiB", value / (kib * kib * kib));
+			}
+			if (value >= kib * kib)
+			{
+				return std::format("{:.2f} MiB", value / (kib * kib));
+			}
+			if (value >= kib)
+			{
+				return std::format("{:.2f} KiB", value / kib);
+			}
+			return std::format("{} B", bytes);
+		}
+
+		template <typename Container, typename Formatter> auto join_values(const Container& values, Formatter&& format_value) -> std::string
+		{
+			std::string out = "[";
+			size_t index = 0;
+			for (const auto& value : values)
+			{
+				if (index >= attribute_preview_limit)
+				{
+					out += std::format(", … ({} total)", static_cast<size_t>(values.size()));
+					break;
+				}
+				out += std::format("{}{}", (index == 0 ? "" : ", "), format_value(value));
+				++index;
+			}
+			out += "]";
+			return out;
+		}
+
+		auto tensor_dims_string(const onnx::TensorProto& tensor) -> std::string
+		{
+			std::string joined;
+			for (int i = 0; i < tensor.dims_size(); ++i)
+			{
+				joined += std::format("{}{}", (i == 0 ? "" : ", "), tensor.dims(i));
+			}
+			return std::format("[{}]", joined);
+		}
+
+		auto attribute_type_name(onnx::AttributeProto::AttributeType type) -> std::string
+		{
+			switch (type)
+			{
+			case onnx::AttributeProto::FLOAT:
+				return "FLOAT";
+			case onnx::AttributeProto::INT:
+				return "INT";
+			case onnx::AttributeProto::STRING:
+				return "STRING";
+			case onnx::AttributeProto::TENSOR:
+				return "TENSOR";
+			case onnx::AttributeProto::GRAPH:
+				return "GRAPH";
+			case onnx::AttributeProto::SPARSE_TENSOR:
+				return "SPARSE_TENSOR";
+			case onnx::AttributeProto::TYPE_PROTO:
+				return "TYPE_PROTO";
+			case onnx::AttributeProto::FLOATS:
+				return "FLOATS";
+			case onnx::AttributeProto::INTS:
+				return "INTS";
+			case onnx::AttributeProto::STRINGS:
+				return "STRINGS";
+			case onnx::AttributeProto::TENSORS:
+				return "TENSORS";
+			case onnx::AttributeProto::GRAPHS:
+				return "GRAPHS";
+			case onnx::AttributeProto::SPARSE_TENSORS:
+				return "SPARSE_TENSORS";
+			case onnx::AttributeProto::TYPE_PROTOS:
+				return "TYPE_PROTOS";
+			default:
+				return "UNDEFINED";
+			}
+		}
+
+		auto to_attribute_info(const onnx::AttributeProto& attribute) -> AttributeInfo
+		{
+			AttributeInfo info;
+			info.name_ = attribute.name();
+			info.type_ = attribute_type_name(attribute.type());
+
+			if (!attribute.ref_attr_name().empty())
+			{
+				info.value_ = std::format("ref '{}'", attribute.ref_attr_name());
+				return info;
+			}
+
+			switch (attribute.type())
+			{
+			case onnx::AttributeProto::FLOAT:
+				info.floats_.push_back(static_cast<double>(attribute.f()));
+				info.value_ = std::format("{}", attribute.f());
+				break;
+			case onnx::AttributeProto::INT:
+				info.ints_.push_back(attribute.i());
+				info.value_ = std::format("{}", attribute.i());
+				break;
+			case onnx::AttributeProto::STRING:
+				info.strings_.push_back(attribute.s());
+				info.value_ = attribute.s();
+				break;
+			case onnx::AttributeProto::TENSOR:
+				info.value_ = std::format("tensor {} {}", data_type_name(attribute.t().data_type()), tensor_dims_string(attribute.t()));
+				break;
+			case onnx::AttributeProto::GRAPH:
+				info.value_ = std::format("graph '{}' ({} nodes)", attribute.g().name(), attribute.g().node_size());
+				break;
+			case onnx::AttributeProto::FLOATS:
+				for (float value : attribute.floats())
+				{
+					info.floats_.push_back(static_cast<double>(value));
+				}
+				info.value_ = join_values(attribute.floats(), [](float value) { return std::format("{}", value); });
+				break;
+			case onnx::AttributeProto::INTS:
+				for (int64_t value : attribute.ints())
+				{
+					info.ints_.push_back(value);
+				}
+				info.value_ = join_values(attribute.ints(), [](int64_t value) { return std::format("{}", value); });
+				break;
+			case onnx::AttributeProto::STRINGS:
+				for (const auto& value : attribute.strings())
+				{
+					info.strings_.push_back(value);
+				}
+				info.value_ = join_values(attribute.strings(), [](const std::string& value) { return std::format("'{}'", value); });
+				break;
+			case onnx::AttributeProto::TENSORS:
+				info.value_ = std::format("{} tensors", attribute.tensors_size());
+				break;
+			case onnx::AttributeProto::GRAPHS:
+			{
+				size_t nested = 0;
+				for (const auto& graph : attribute.graphs())
+				{
+					nested += static_cast<size_t>(graph.node_size());
+				}
+				info.value_ = std::format("{} graphs ({} nodes)", attribute.graphs_size(), nested);
+				break;
+			}
+			case onnx::AttributeProto::SPARSE_TENSOR:
+				info.value_ = "sparse tensor";
+				break;
+			case onnx::AttributeProto::SPARSE_TENSORS:
+				info.value_ = std::format("{} sparse tensors", attribute.sparse_tensors_size());
+				break;
+			case onnx::AttributeProto::TYPE_PROTO:
+				info.value_ = "type proto";
+				break;
+			case onnx::AttributeProto::TYPE_PROTOS:
+				info.value_ = std::format("{} type protos", attribute.type_protos_size());
+				break;
+			default:
+				break;
+			}
+			return info;
+		}
+
+		auto graph_node_count_recursive(const onnx::GraphProto& graph) -> size_t
+		{
+			size_t total = static_cast<size_t>(graph.node_size());
+			for (const auto& node : graph.node())
+			{
+				for (const auto& attribute : node.attribute())
+				{
+					if (attribute.has_g())
+					{
+						total += graph_node_count_recursive(attribute.g());
+					}
+					for (const auto& nested : attribute.graphs())
+					{
+						total += graph_node_count_recursive(nested);
+					}
+				}
+			}
+			return total;
+		}
+
+		auto node_subgraph_count(const onnx::NodeProto& node) -> size_t
+		{
+			size_t total = 0;
+			for (const auto& attribute : node.attribute())
+			{
+				if (attribute.has_g())
+				{
+					total += graph_node_count_recursive(attribute.g());
+				}
+				for (const auto& nested : attribute.graphs())
+				{
+					total += graph_node_count_recursive(nested);
+				}
+			}
+			return total;
+		}
+
+		auto accumulate_operator_counts(const onnx::GraphProto& graph, std::map<std::string, size_t>& counts) -> void
+		{
+			for (const auto& node : graph.node())
+			{
+				++counts[node.op_type()];
+				for (const auto& attribute : node.attribute())
+				{
+					if (attribute.has_g())
+					{
+						accumulate_operator_counts(attribute.g(), counts);
+					}
+					for (const auto& nested : attribute.graphs())
+					{
+						accumulate_operator_counts(nested, counts);
+					}
+				}
+			}
+		}
+
 		auto initializer_data_json(const onnx::TensorProto& tensor) -> std::optional<boost::json::array>
 		{
 			namespace json = boost::json;
@@ -144,7 +374,7 @@ namespace YirangOnnx
 			case onnx::TensorProto::INT64:
 				for (int i = 0; i < tensor.int64_data_size(); ++i)
 				{
-					values.push_back(json::value(static_cast<int64_t>(tensor.int64_data(i))));
+					values.push_back(json::value(tensor.int64_data(i)));
 				}
 				if (tensor.int64_data_size() == 0 && tensor.has_raw_data())
 				{
@@ -215,6 +445,21 @@ namespace YirangOnnx
 		default:
 			return std::format("UNKNOWN({})", data_type);
 		}
+	}
+
+	auto data_type_id(const std::string& name) -> std::optional<int32_t>
+	{
+		std::string upper = name;
+		std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+
+		for (int32_t candidate = onnx::TensorProto::UNDEFINED; candidate <= onnx::TensorProto::INT4; ++candidate)
+		{
+			if (data_type_name(candidate) == upper)
+			{
+				return candidate;
+			}
+		}
+		return std::nullopt;
 	}
 
 	auto OnnxModel::load(const std::string& path) -> std::tuple<std::optional<OnnxModel>, std::optional<std::string>>
@@ -351,8 +596,9 @@ namespace YirangOnnx
 			}
 			for (int j = 0; j < node.attribute_size(); ++j)
 			{
-				info.attribute_names_.push_back(node.attribute(j).name());
+				info.attributes_.push_back(to_attribute_info(node.attribute(j)));
 			}
+			info.subgraph_node_count_ = node_subgraph_count(node);
 			result.push_back(std::move(info));
 		}
 		return result;
@@ -382,6 +628,19 @@ namespace YirangOnnx
 			{
 				info.source_ = TensorDataSource::External;
 				info.byte_size_ = 0;
+				for (const auto& entry : tensor.external_data())
+				{
+					info.external_data_.push_back(MetadataEntry{ entry.key(), entry.value() });
+					if (entry.key() == "length")
+					{
+						int64_t length = 0;
+						auto [ptr, ec] = std::from_chars(entry.value().data(), entry.value().data() + entry.value().size(), length);
+						if (ec == std::errc() && length > 0)
+						{
+							info.byte_size_ = static_cast<size_t>(length);
+						}
+					}
+				}
 			}
 			else
 			{
@@ -398,11 +657,7 @@ namespace YirangOnnx
 		std::map<std::string, size_t> counts;
 		if (model_.has_graph())
 		{
-			const auto& graph = model_.graph();
-			for (int i = 0; i < graph.node_size(); ++i)
-			{
-				++counts[graph.node(i).op_type()];
-			}
+			accumulate_operator_counts(model_.graph(), counts);
 		}
 
 		std::vector<std::pair<std::string, size_t>> result(counts.begin(), counts.end());
@@ -488,9 +743,14 @@ namespace YirangOnnx
 		}
 		root["operators"] = std::move(operators);
 
+		const auto node_list = nodes();
+		size_t subgraph_nodes = 0;
+
 		json::array node_array;
-		for (const auto& node : nodes())
+		for (const auto& node : node_list)
 		{
+			subgraph_nodes += node.subgraph_node_count_;
+
 			json::object entry;
 			entry["name"] = node.name_;
 			entry["op_type"] = node.op_type_;
@@ -511,20 +771,77 @@ namespace YirangOnnx
 			entry["outputs"] = std::move(outs);
 
 			json::array attrs;
-			for (const auto& name : node.attribute_names_)
+			for (const auto& attribute : node.attributes_)
 			{
-				attrs.push_back(json::value(name));
+				json::object attr;
+				attr["name"] = attribute.name_;
+				attr["type"] = attribute.type_;
+				if (attribute.type_ == "INT" && attribute.ints_.size() == 1)
+				{
+					attr["value"] = attribute.ints_[0];
+				}
+				else if (attribute.type_ == "FLOAT" && attribute.floats_.size() == 1)
+				{
+					attr["value"] = attribute.floats_[0];
+				}
+				else if (attribute.type_ == "STRING" && attribute.strings_.size() == 1)
+				{
+					attr["value"] = attribute.strings_[0];
+				}
+				else if (attribute.type_ == "INTS")
+				{
+					json::array values;
+					for (int64_t value : attribute.ints_)
+					{
+						values.push_back(json::value(value));
+					}
+					attr["value"] = std::move(values);
+				}
+				else if (attribute.type_ == "FLOATS")
+				{
+					json::array values;
+					for (double value : attribute.floats_)
+					{
+						values.push_back(json::value(value));
+					}
+					attr["value"] = std::move(values);
+				}
+				else if (attribute.type_ == "STRINGS")
+				{
+					json::array values;
+					for (const auto& value : attribute.strings_)
+					{
+						values.push_back(json::value(value));
+					}
+					attr["value"] = std::move(values);
+				}
+				else
+				{
+					attr["value"] = attribute.value_;
+				}
+				attrs.push_back(std::move(attr));
 			}
 			entry["attributes"] = std::move(attrs);
+
+			if (node.subgraph_node_count_ > 0)
+			{
+				entry["subgraph_node_count"] = static_cast<int64_t>(node.subgraph_node_count_);
+			}
 			node_array.push_back(std::move(entry));
 		}
 		root["nodes"] = std::move(node_array);
+		root["subgraph_node_count"] = static_cast<int64_t>(subgraph_nodes);
 
 		json::array init_array;
 		const auto init_list = initializers();
+		size_t total_parameters = 0;
+		size_t total_initializer_bytes = 0;
 		for (size_t i = 0; i < init_list.size(); ++i)
 		{
 			const auto& tensor = init_list[i];
+			total_parameters += tensor.element_count();
+			total_initializer_bytes += tensor.byte_size_;
+
 			json::object entry;
 			entry["name"] = tensor.name_;
 			entry["data_type"] = tensor.data_type_;
@@ -536,6 +853,16 @@ namespace YirangOnnx
 			entry["dims"] = std::move(dims);
 			entry["source"] = (tensor.source_ == TensorDataSource::External) ? "external" : "inline";
 			entry["byte_size"] = static_cast<int64_t>(tensor.byte_size_);
+
+			if (!tensor.external_data_.empty())
+			{
+				json::object external;
+				for (const auto& kv : tensor.external_data_)
+				{
+					external[kv.key_] = kv.value_;
+				}
+				entry["external_data"] = std::move(external);
+			}
 
 			if (include_initializer_data && model_.has_graph())
 			{
@@ -551,6 +878,8 @@ namespace YirangOnnx
 			init_array.push_back(std::move(entry));
 		}
 		root["initializers"] = std::move(init_array);
+		root["total_parameters"] = static_cast<int64_t>(total_parameters);
+		root["total_initializer_bytes"] = static_cast<int64_t>(total_initializer_bytes);
 
 		return JsonTool::pretty_format(root);
 	}
@@ -558,11 +887,45 @@ namespace YirangOnnx
 	auto OnnxModel::to_dot(void) const -> std::string
 	{
 		const auto node_list = nodes();
+		const auto input_list = inputs();
+		const auto output_list = outputs();
+
+		std::unordered_set<std::string> initializer_names;
+		for (const auto& tensor : initializers())
+		{
+			initializer_names.insert(tensor.name_);
+		}
+
+		const auto value_label = [](const ValueInfo& value) -> std::string
+		{
+			std::string label = escape_dot(value.name_.empty() ? "?" : value.name_);
+			if (!value.data_type_.empty())
+			{
+				std::string shape;
+				for (size_t i = 0; i < value.shape_.size(); ++i)
+				{
+					shape += std::format("{}{}", (i == 0 ? "" : ", "), value.shape_[i]);
+				}
+				label += std::format("\\n{} [{}]", escape_dot(value.data_type_), escape_dot(shape));
+			}
+			return label;
+		};
 
 		std::ostringstream out;
 		out << "digraph onnx_model\n{\n";
 		out << "\trankdir=TB;\n";
 		out << "\tnode [shape=box, style=rounded];\n";
+
+		std::unordered_map<std::string, std::string> input_node_ids;
+		for (size_t i = 0; i < input_list.size(); ++i)
+		{
+			if (initializer_names.contains(input_list[i].name_))
+			{
+				continue;
+			}
+			out << std::format("\tgi{} [label=\"{}\", shape=ellipse, style=filled, fillcolor=lightblue];\n", i, value_label(input_list[i]));
+			input_node_ids[input_list[i].name_] = std::format("gi{}", i);
+		}
 
 		for (size_t i = 0; i < node_list.size(); ++i)
 		{
@@ -574,6 +937,11 @@ namespace YirangOnnx
 				label += "\\n" + escape_dot(node.name_);
 			}
 			out << std::format("\tn{} [label=\"{}\"];\n", i, label);
+		}
+
+		for (size_t i = 0; i < output_list.size(); ++i)
+		{
+			out << std::format("\tgo{} [label=\"{}\", shape=ellipse, style=filled, fillcolor=palegreen];\n", i, value_label(output_list[i]));
 		}
 
 		std::unordered_map<std::string, size_t> producer;
@@ -589,11 +957,22 @@ namespace YirangOnnx
 		{
 			for (const auto& input : node_list[i].inputs_)
 			{
-				auto found = producer.find(input);
-				if (found != producer.end())
+				if (auto found = producer.find(input); found != producer.end())
 				{
 					out << std::format("\tn{} -> n{} [label=\"{}\"];\n", found->second, i, escape_dot(input));
 				}
+				else if (auto graph_input = input_node_ids.find(input); graph_input != input_node_ids.end())
+				{
+					out << std::format("\t{} -> n{} [label=\"{}\"];\n", graph_input->second, i, escape_dot(input));
+				}
+			}
+		}
+
+		for (size_t i = 0; i < output_list.size(); ++i)
+		{
+			if (auto found = producer.find(output_list[i].name_); found != producer.end())
+			{
+				out << std::format("\tn{} -> go{} [label=\"{}\"];\n", found->second, i, escape_dot(output_list[i].name_));
 			}
 		}
 
@@ -607,6 +986,20 @@ namespace YirangOnnx
 		const auto node_list = nodes();
 		const auto init_list = initializers();
 
+		size_t subgraph_nodes = 0;
+		for (const auto& node : node_list)
+		{
+			subgraph_nodes += node.subgraph_node_count_;
+		}
+
+		size_t total_parameters = 0;
+		size_t total_initializer_bytes = 0;
+		for (const auto& tensor : init_list)
+		{
+			total_parameters += tensor.element_count();
+			total_initializer_bytes += tensor.byte_size_;
+		}
+
 		std::ostringstream out;
 		out << "ONNX model summary\n";
 		out << std::format("  ir_version    : {}\n", meta.ir_version_);
@@ -619,8 +1012,9 @@ namespace YirangOnnx
 		{
 			out << std::format("      {} v{}\n", opset.domain_.empty() ? "ai.onnx" : opset.domain_, opset.version_);
 		}
-		out << std::format("  nodes         : {}\n", node_list.size());
+		out << std::format("  nodes         : {}{}\n", node_list.size(), (subgraph_nodes > 0) ? std::format(" (+{} in subgraphs)", subgraph_nodes) : "");
 		out << std::format("  initializers  : {}\n", init_list.size());
+		out << std::format("  parameters    : {} ({})\n", total_parameters, human_bytes(total_initializer_bytes));
 		out << std::format("  inputs        : {}\n", inputs().size());
 		out << std::format("  outputs       : {}\n", outputs().size());
 		out << "  operators     :\n";

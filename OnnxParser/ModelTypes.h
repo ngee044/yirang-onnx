@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace YirangOnnx
@@ -47,13 +47,35 @@ namespace YirangOnnx
 		std::vector<int64_t> dims_;
 		TensorDataSource source_ = TensorDataSource::None;
 		size_t byte_size_ = 0;
+		std::vector<MetadataEntry> external_data_;
+
+		auto element_count(void) const -> size_t
+		{
+			size_t count = 1;
+			for (int64_t dim : dims_)
+			{
+				count *= (dim > 0) ? static_cast<size_t>(dim) : 0;
+			}
+			return count;
+		}
 	};
 
 	struct ValueInfo
 	{
 		std::string name_;
 		std::string data_type_;
+		int32_t elem_type_ = 0;
 		std::vector<std::string> shape_;
+	};
+
+	struct AttributeInfo
+	{
+		std::string name_;
+		std::string type_;
+		std::string value_;
+		std::vector<int64_t> ints_;
+		std::vector<double> floats_;
+		std::vector<std::string> strings_;
 	};
 
 	struct NodeInfo
@@ -63,8 +85,10 @@ namespace YirangOnnx
 		std::string domain_;
 		std::vector<std::string> inputs_;
 		std::vector<std::string> outputs_;
-		std::vector<std::string> attribute_names_;
+		std::vector<AttributeInfo> attributes_;
+		size_t subgraph_node_count_ = 0;
 	};
 
 	auto data_type_name(int32_t data_type) -> std::string;
+	auto data_type_id(const std::string& name) -> std::optional<int32_t>;
 } // namespace YirangOnnx
