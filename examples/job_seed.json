@@ -1,0 +1,6 @@
+{
+  "model": "models/linear.onnx",
+  "inputs": [ { "name": "input", "random": { "shape": [1, 4], "seed": 42 } } ],
+  "run": { "repeat": 1 },
+  "outputs": { "dir": "outputs", "save": true, "dump_json": true, "stats": true }
+}

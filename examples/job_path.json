@@ -1,0 +1,5 @@
+{
+  "model": "models/linear.onnx",
+  "inputs": [ { "name": "input", "path": "tensors/input.pb" } ],
+  "outputs": { "dir": "outputs", "save": true, "dump_json": true, "stats": true }
+}

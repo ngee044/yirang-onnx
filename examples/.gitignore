@@ -1,0 +1,7 @@
+outputs/
+outputs_*/
+linear*.json
+*.dot
+*.svg
+__pycache__/
+venv/

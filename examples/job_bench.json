@@ -1,0 +1,7 @@
+{
+  "model": "models/linear.onnx",
+  "inspect": { "format": "summary" },
+  "inputs": [ { "name": "input", "random": { "shape": [8, 4], "seed": 7 } } ],
+  "run": { "repeat": 100, "warmup": 10 },
+  "outputs": { "dir": "outputs", "save": true, "dump_json": false, "stats": true }
+}

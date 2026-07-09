@@ -1,0 +1,6 @@
+{
+  "model": "models/linear.onnx",
+  "dim_overrides": { "N": 1 },
+  "run": { "repeat": 1 },
+  "outputs": { "dir": "outputs", "save": true, "stats": true }
+}
