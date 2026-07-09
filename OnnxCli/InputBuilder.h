@@ -3,6 +3,7 @@
 #include "ModelTypes.h"
 #include "Tensor.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -12,11 +13,15 @@
 
 namespace YirangOnnx
 {
+	inline constexpr size_t kMaxTensorElements = static_cast<size_t>(1) << 30;
+
 	struct ResolvedShape
 	{
 		std::vector<int64_t> dims_;
 		std::vector<std::string> notes_;
 	};
+
+	auto random_generation_supports(int32_t elem_type) -> bool;
 
 	auto resolve_input_shape(const ValueInfo& input, const std::map<std::string, int64_t>& dim_overrides)
 		-> std::tuple<std::optional<ResolvedShape>, std::optional<std::string>>;

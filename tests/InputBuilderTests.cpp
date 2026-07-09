@@ -71,3 +71,19 @@ TEST(InputBuilderTest, RejectsUnsupportedRandomType)
 	ASSERT_TRUE(error.has_value());
 	EXPECT_NE(error->find("STRING"), std::string::npos);
 }
+
+TEST(InputBuilderTest, RejectsOversizedShape)
+{
+	auto [tensor, error] = make_random_tensor("X", 1, { 1 << 20, 1 << 20 }, 0);
+	EXPECT_FALSE(tensor.has_value());
+	ASSERT_TRUE(error.has_value());
+	EXPECT_NE(error->find("exceeds limit"), std::string::npos);
+}
+
+TEST(InputBuilderTest, ReportsRandomSupport)
+{
+	EXPECT_TRUE(random_generation_supports(1));
+	EXPECT_TRUE(random_generation_supports(11));
+	EXPECT_FALSE(random_generation_supports(8));
+	EXPECT_FALSE(random_generation_supports(10));
+}

@@ -134,6 +134,65 @@ TEST(InputProjectTest, RejectsInvalidScripts)
 	}
 }
 
+TEST(InputProjectTest, RejectsUnknownKeys)
+{
+	{
+		auto [project, error] = InputProject::parse(R"({ "modl": "m.onnx" })", "test");
+		EXPECT_FALSE(project.has_value());
+		ASSERT_TRUE(error.has_value());
+		EXPECT_NE(error->find("modl"), std::string::npos);
+	}
+	{
+		auto [project, error] = InputProject::parse(R"({ "run": { "reepeat": 5 } })", "test");
+		EXPECT_FALSE(project.has_value());
+		ASSERT_TRUE(error.has_value());
+		EXPECT_NE(error->find("reepeat"), std::string::npos);
+	}
+	{
+		auto [project, error] = InputProject::parse(R"({ "inputs": [ { "name": "audio", "pat": "audio.pb" } ] })", "test");
+		EXPECT_FALSE(project.has_value());
+		ASSERT_TRUE(error.has_value());
+		EXPECT_NE(error->find("pat"), std::string::npos);
+	}
+}
+
+TEST(InputProjectTest, AcceptsUnderscoreCommentKeys)
+{
+	auto [project, error] = InputProject::parse(R"({ "_comment": "note", "_note": 1, "model": "m.onnx" })", "test");
+	ASSERT_TRUE(project.has_value()) << error.value_or("");
+	EXPECT_EQ(project->model_path(), "m.onnx");
+}
+
+TEST(InputProjectTest, RejectsInvalidRandomDataType)
+{
+	{
+		auto [project, error] = InputProject::parse(R"({ "inputs": [ { "name": "X", "random": { "data_type": "flaot" } } ] })", "test");
+		EXPECT_FALSE(project.has_value());
+		ASSERT_TRUE(error.has_value());
+		EXPECT_NE(error->find("flaot"), std::string::npos);
+	}
+	{
+		auto [project, error] = InputProject::parse(R"({ "inputs": [ { "name": "X", "random": { "data_type": "FLOAT16" } } ] })", "test");
+		EXPECT_FALSE(project.has_value());
+		ASSERT_TRUE(error.has_value());
+		EXPECT_NE(error->find("FLOAT16"), std::string::npos);
+	}
+}
+
+TEST(InputProjectTest, RejectsOversizedShapeAndRunBounds)
+{
+	{
+		auto [project, error] = InputProject::parse(R"({ "inputs": [ { "name": "X", "random": { "shape": [1000000000, 1000000000] } } ] })", "test");
+		EXPECT_FALSE(project.has_value());
+		ASSERT_TRUE(error.has_value());
+		EXPECT_NE(error->find("exceeds limit"), std::string::npos);
+	}
+	{
+		auto [project, error] = InputProject::parse(R"({ "run": { "repeat": 2000000 } })", "test");
+		EXPECT_FALSE(project.has_value());
+	}
+}
+
 TEST(InputProjectTest, LoadFailsForMissingFile)
 {
 	auto [project, error] = InputProject::load("/no/such/input_project.json");

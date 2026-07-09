@@ -7,6 +7,7 @@
 #include "File.h"
 #include "Logger.h"
 
+#include <exception>
 #include <format>
 #include <memory>
 #include <optional>
@@ -118,6 +119,7 @@ namespace
 				InferenceJob job;
 				job.inputs_ = cli_input_specs(configurations);
 				job.outputs_.dir_ = configurations.output_dir();
+				job.tuning_ = configurations.session_tuning();
 				return run_inference(model.value(), model_path, job);
 			}
 
@@ -149,6 +151,7 @@ namespace
 			job.dim_overrides_ = project->dim_overrides();
 			job.run_ = project->run();
 			job.outputs_ = project->outputs();
+			job.tuning_ = configurations.session_tuning();
 			if (job.outputs_.dir_.empty())
 			{
 				job.outputs_.dir_ = configurations.output_dir();
@@ -202,7 +205,15 @@ auto main(int argc, char* argv[]) -> int
 	}
 	else
 	{
-		exit_code = execute(*configurations);
+		try
+		{
+			exit_code = execute(*configurations);
+		}
+		catch (const std::exception& e)
+		{
+			Logger::handle().write(LogTypes::Error, std::format("fatal error: {}", e.what()));
+			exit_code = 1;
+		}
 	}
 
 	configurations.reset();

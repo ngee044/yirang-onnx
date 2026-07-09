@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ArgumentParser.h"
+#include "InferenceEngine.h"
 #include "LogTypes.h"
 
 #include <cstdint>
@@ -35,6 +36,8 @@ namespace YirangOnnx
 		auto write_file(void) const -> LogTypes;
 		auto write_interval(void) const -> uint16_t;
 
+		auto session_tuning(void) const -> SessionTuning;
+
 		auto invalid_reason(void) const -> std::optional<std::string>;
 		auto load_warning(void) const -> std::optional<std::string>;
 
@@ -63,6 +66,8 @@ namespace YirangOnnx
 		LogTypes write_console_;
 		LogTypes write_file_;
 		uint16_t write_interval_;
+
+		SessionTuning session_tuning_;
 
 		std::optional<std::string> invalid_reason_;
 		std::optional<std::string> load_warning_;

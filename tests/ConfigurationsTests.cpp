@@ -107,10 +107,120 @@ TEST(ConfigurationsTest, LoadsEngineSettingsAndIgnoresJobKeys)
 	EXPECT_EQ(from_json.write_interval(), 500);
 	EXPECT_EQ(from_json.output_format(), "summary");
 	EXPECT_EQ(from_json.model_path(), "model.onnx");
-	EXPECT_FALSE(from_json.load_warning().has_value());
+	ASSERT_TRUE(from_json.load_warning().has_value());
+	EXPECT_NE(from_json.load_warning()->find("output_format"), std::string::npos);
+	EXPECT_NE(from_json.load_warning()->find("model_path"), std::string::npos);
 
 	Configurations overridden(make_parser({ "--model", "model.onnx", "--title", "from-cli" }), config_name);
 	EXPECT_EQ(overridden.app_title(), "from-cli");
+}
+
+TEST(ConfigurationsTest, WarnsOnEngineKeyTypeMismatch)
+{
+	const std::string config_name = "onnx_parser_tests_type_mismatch_configurations.json";
+	ScopedConfigFile config(config_name, R"({ "app_title": 123 })");
+
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), config_name);
+	EXPECT_EQ(configurations.app_title(), "yirang-onnx");
+	ASSERT_TRUE(configurations.load_warning().has_value());
+	EXPECT_NE(configurations.load_warning()->find("app_title"), std::string::npos);
+	EXPECT_FALSE(configurations.invalid_reason().has_value());
+}
+
+TEST(ConfigurationsTest, WarnsOnInvalidLogLevel)
+{
+	const std::string config_name = "onnx_parser_tests_bad_level_configurations.json";
+	ScopedConfigFile config(config_name, R"({ "write_console": 99 })");
+
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), config_name);
+	EXPECT_EQ(configurations.write_console(), LogTypes::Information);
+	ASSERT_TRUE(configurations.load_warning().has_value());
+	EXPECT_NE(configurations.load_warning()->find("write_console"), std::string::npos);
+}
+
+TEST(ConfigurationsTest, WarnsOnUnknownKey)
+{
+	const std::string config_name = "onnx_parser_tests_unknown_key_configurations.json";
+	ScopedConfigFile config(config_name, R"({ "wrte_console": 2 })");
+
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), config_name);
+	ASSERT_TRUE(configurations.load_warning().has_value());
+	EXPECT_NE(configurations.load_warning()->find("wrte_console"), std::string::npos);
+}
+
+TEST(ConfigurationsTest, DoesNotCrashOnNonIntegerNumber)
+{
+	const std::string config_name = "onnx_parser_tests_double_configurations.json";
+	ScopedConfigFile config(config_name, R"({ "write_console": 2.5, "write_interval": 500 })");
+
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), config_name);
+	EXPECT_EQ(configurations.write_console(), LogTypes::Information);
+	EXPECT_EQ(configurations.write_interval(), 500);
+	ASSERT_TRUE(configurations.load_warning().has_value());
+	EXPECT_NE(configurations.load_warning()->find("write_console"), std::string::npos);
+}
+
+TEST(ConfigurationsTest, IgnoresUnderscoreCommentKeys)
+{
+	const std::string config_name = "onnx_parser_tests_comment_configurations.json";
+	ScopedConfigFile config(config_name, R"({ "_comment": "note", "app_title": "ok" })");
+
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), config_name);
+	EXPECT_EQ(configurations.app_title(), "ok");
+	EXPECT_FALSE(configurations.load_warning().has_value());
+}
+
+TEST(ConfigurationsTest, LoadsSessionTuning)
+{
+	const std::string config_name = "onnx_parser_tests_tuning_configurations.json";
+	ScopedConfigFile config(
+		config_name,
+		R"({ "intra_op_threads": 2, "inter_op_threads": 1, "enable_mem_pattern": false, "enable_cpu_mem_arena": false, "execution_mode": "parallel", "graph_optimization": "basic" })");
+
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), config_name);
+	EXPECT_FALSE(configurations.load_warning().has_value());
+
+	const auto tuning = configurations.session_tuning();
+	ASSERT_TRUE(tuning.intra_op_threads_.has_value());
+	EXPECT_EQ(tuning.intra_op_threads_.value(), 2);
+	ASSERT_TRUE(tuning.inter_op_threads_.has_value());
+	EXPECT_EQ(tuning.inter_op_threads_.value(), 1);
+	EXPECT_FALSE(tuning.enable_mem_pattern_);
+	EXPECT_FALSE(tuning.enable_cpu_mem_arena_);
+	EXPECT_EQ(tuning.execution_mode_, ExecutionMode::parallel);
+	EXPECT_EQ(tuning.graph_optimization_, GraphOptimization::basic);
+}
+
+TEST(ConfigurationsTest, DefaultsSessionTuningWithoutConfig)
+{
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), missing_config);
+
+	const auto tuning = configurations.session_tuning();
+	EXPECT_FALSE(tuning.intra_op_threads_.has_value());
+	EXPECT_FALSE(tuning.inter_op_threads_.has_value());
+	EXPECT_TRUE(tuning.enable_mem_pattern_);
+	EXPECT_TRUE(tuning.enable_cpu_mem_arena_);
+	EXPECT_EQ(tuning.execution_mode_, ExecutionMode::sequential);
+	EXPECT_EQ(tuning.graph_optimization_, GraphOptimization::all);
+}
+
+TEST(ConfigurationsTest, WarnsOnInvalidSessionTuning)
+{
+	const std::string config_name = "onnx_parser_tests_bad_tuning_configurations.json";
+	ScopedConfigFile config(config_name, R"({ "intra_op_threads": -1, "execution_mode": "turbo", "graph_optimization": "max" })");
+
+	Configurations configurations(make_parser({ "--model", "model.onnx" }), config_name);
+
+	const auto tuning = configurations.session_tuning();
+	EXPECT_FALSE(tuning.intra_op_threads_.has_value());
+	EXPECT_EQ(tuning.execution_mode_, ExecutionMode::sequential);
+	EXPECT_EQ(tuning.graph_optimization_, GraphOptimization::all);
+
+	ASSERT_TRUE(configurations.load_warning().has_value());
+	EXPECT_NE(configurations.load_warning()->find("execution_mode"), std::string::npos);
+	EXPECT_NE(configurations.load_warning()->find("graph_optimization"), std::string::npos);
+	EXPECT_NE(configurations.load_warning()->find("intra_op_threads"), std::string::npos);
+	EXPECT_FALSE(configurations.invalid_reason().has_value());
 }
 
 TEST(ConfigurationsTest, AcceptsInputScriptWithoutModel)

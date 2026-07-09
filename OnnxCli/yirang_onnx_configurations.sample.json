@@ -1,8 +1,15 @@
 {
-	"_comment": "Copy next to the binary as 'yirang_onnx_configurations.json'. Static engine settings only (logging/title); job-level values live in input_project.json (--input-script) or CLI args. write_console/write_file are LogTypes ints (0=None).",
+	"_comment": "Copy next to the binary as 'yirang_onnx_configurations.json'. Static engine settings only (logging/title/ONNX Runtime session tuning); job-level values live in input_project.json (--input-script) or CLI args. write_console/write_file are LogTypes ints (0=None).",
+	"_session_comment": "ONNX Runtime session tuning. Omit any key to keep ORT defaults. intra/inter_op_threads: 0 lets ORT decide. execution_mode: sequential|parallel. graph_optimization: disabled|basic|extended|all.",
 	"app_title": "yirang-onnx",
 	"log_root_path": "logs/",
 	"write_console": 0,
 	"write_file": 0,
-	"write_interval": 1000
+	"write_interval": 1000,
+	"intra_op_threads": 0,
+	"inter_op_threads": 1,
+	"enable_mem_pattern": true,
+	"enable_cpu_mem_arena": true,
+	"execution_mode": "sequential",
+	"graph_optimization": "all"
 }

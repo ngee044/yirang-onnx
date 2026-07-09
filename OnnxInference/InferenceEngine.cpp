@@ -49,11 +49,65 @@ namespace YirangOnnx
 
 	auto InferenceEngine::operator=(InferenceEngine&&) noexcept -> InferenceEngine& = default;
 
-	auto InferenceEngine::load(const std::string& model_path) -> std::expected<void, std::string>
+	auto InferenceEngine::load(const std::string& model_path, const SessionTuning& tuning) -> std::expected<void, std::string>
 	{
 		try
 		{
 			Ort::SessionOptions session_options;
+
+			if (tuning.intra_op_threads_.has_value())
+			{
+				session_options.SetIntraOpNumThreads(tuning.intra_op_threads_.value());
+			}
+			if (tuning.inter_op_threads_.has_value())
+			{
+				session_options.SetInterOpNumThreads(tuning.inter_op_threads_.value());
+			}
+
+			if (tuning.enable_mem_pattern_)
+			{
+				session_options.EnableMemPattern();
+			}
+			else
+			{
+				session_options.DisableMemPattern();
+			}
+
+			if (tuning.enable_cpu_mem_arena_)
+			{
+				session_options.EnableCpuMemArena();
+			}
+			else
+			{
+				session_options.DisableCpuMemArena();
+			}
+
+			switch (tuning.execution_mode_)
+			{
+			case ExecutionMode::sequential:
+				session_options.SetExecutionMode(ORT_SEQUENTIAL);
+				break;
+			case ExecutionMode::parallel:
+				session_options.SetExecutionMode(ORT_PARALLEL);
+				break;
+			}
+
+			switch (tuning.graph_optimization_)
+			{
+			case GraphOptimization::disabled:
+				session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
+				break;
+			case GraphOptimization::basic:
+				session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+				break;
+			case GraphOptimization::extended:
+				session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+				break;
+			case GraphOptimization::all:
+				session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+				break;
+			}
+
 			backend_->session_.emplace(backend_->env_, model_path.c_str(), session_options);
 			return {};
 		}

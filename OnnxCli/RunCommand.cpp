@@ -12,12 +12,14 @@
 #include "onnx.pb.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_set>
 #include <utility>
@@ -39,6 +41,43 @@ namespace YirangOnnx
 				joined += std::format("{}{}", (i == 0 ? "" : ", "), shape[i]);
 			}
 			return std::format("[{}]", joined);
+		}
+
+		auto execution_mode_name(ExecutionMode mode) -> std::string_view
+		{
+			switch (mode)
+			{
+			case ExecutionMode::sequential:
+				return "sequential";
+			case ExecutionMode::parallel:
+				return "parallel";
+			}
+			return "sequential";
+		}
+
+		auto graph_optimization_name(GraphOptimization level) -> std::string_view
+		{
+			switch (level)
+			{
+			case GraphOptimization::disabled:
+				return "disabled";
+			case GraphOptimization::basic:
+				return "basic";
+			case GraphOptimization::extended:
+				return "extended";
+			case GraphOptimization::all:
+				return "all";
+			}
+			return "all";
+		}
+
+		auto tuning_summary(const SessionTuning& tuning) -> std::string
+		{
+			const std::string intra = tuning.intra_op_threads_.has_value() ? std::to_string(tuning.intra_op_threads_.value()) : "default";
+			const std::string inter = tuning.inter_op_threads_.has_value() ? std::to_string(tuning.inter_op_threads_.value()) : "default";
+			return std::format("session tuning: intra_op_threads={}, inter_op_threads={}, mem_pattern={}, cpu_mem_arena={}, execution_mode={}, graph_optimization={}",
+							   intra, inter, tuning.enable_mem_pattern_, tuning.enable_cpu_mem_arena_, execution_mode_name(tuning.execution_mode_),
+							   graph_optimization_name(tuning.graph_optimization_));
 		}
 
 		auto safe_file_name(const std::string& name) -> std::string
@@ -294,6 +333,31 @@ namespace YirangOnnx
 			initializer_names.insert(tensor.name_);
 		}
 
+		if (!job.dim_overrides_.empty())
+		{
+			std::unordered_set<std::string> symbolic_dims;
+			for (const auto& input : graph_inputs)
+			{
+				for (const auto& dim : input.shape_)
+				{
+					int64_t numeric = 0;
+					auto [ptr, ec] = std::from_chars(dim.data(), dim.data() + dim.size(), numeric);
+					if (ec != std::errc() || ptr != dim.data() + dim.size())
+					{
+						symbolic_dims.insert(dim);
+					}
+				}
+			}
+			for (const auto& override_entry : job.dim_overrides_)
+			{
+				if (!symbolic_dims.contains(override_entry.first))
+				{
+					Logger::handle().write(LogTypes::Warning,
+										   std::format("dim_overrides key '{}' matches no symbolic dimension in the model (ignored)", override_entry.first));
+				}
+			}
+		}
+
 		std::vector<InputSpec> specs = job.inputs_;
 		if (specs.empty())
 		{
@@ -317,6 +381,7 @@ namespace YirangOnnx
 		}
 
 		std::vector<Tensor> inputs;
+		std::unordered_set<std::string> fed_names;
 		for (const auto& spec : specs)
 		{
 			if (!spec.path_.empty())
@@ -326,6 +391,15 @@ namespace YirangOnnx
 				{
 					Logger::handle().write(LogTypes::Error, error.value_or("cannot load input tensor"));
 					return 1;
+				}
+				if (!spec.name_.empty() && spec.name_ != tensor.value().name_)
+				{
+					Logger::handle().write(LogTypes::Warning, std::format("input file '{}' declares name '{}' but the tensor is named '{}'; using '{}'", spec.path_,
+																		  spec.name_, tensor.value().name_, tensor.value().name_));
+				}
+				if (!fed_names.insert(tensor.value().name_).second)
+				{
+					Logger::handle().write(LogTypes::Warning, std::format("input '{}' is provided more than once", tensor.value().name_));
 				}
 				inputs.push_back(std::move(tensor.value()));
 				continue;
@@ -352,11 +426,17 @@ namespace YirangOnnx
 				Logger::handle().write(LogTypes::Error, error.value_or("cannot build random input"));
 				return 1;
 			}
+			if (!fed_names.insert(tensor.value().name_).second)
+			{
+				Logger::handle().write(LogTypes::Warning, std::format("input '{}' is provided more than once", tensor.value().name_));
+			}
 			inputs.push_back(std::move(tensor.value()));
 		}
 
+		Logger::handle().write(LogTypes::Information, tuning_summary(job.tuning_));
+
 		InferenceEngine engine;
-		if (auto loaded = engine.load(model_path); !loaded)
+		if (auto loaded = engine.load(model_path, job.tuning_); !loaded)
 		{
 			Logger::handle().write(LogTypes::Error, loaded.error());
 			return 1;

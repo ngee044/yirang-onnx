@@ -11,6 +11,30 @@
 
 namespace YirangOnnx
 {
+	enum class ExecutionMode
+	{
+		sequential,
+		parallel
+	};
+
+	enum class GraphOptimization
+	{
+		disabled,
+		basic,
+		extended,
+		all
+	};
+
+	struct SessionTuning
+	{
+		std::optional<int> intra_op_threads_;
+		std::optional<int> inter_op_threads_;
+		bool enable_mem_pattern_ = true;
+		bool enable_cpu_mem_arena_ = true;
+		ExecutionMode execution_mode_ = ExecutionMode::sequential;
+		GraphOptimization graph_optimization_ = GraphOptimization::all;
+	};
+
 	// Runs ONNX models via ONNX Runtime. Kept free of onnxruntime headers so
 	// consumers only depend on Tensor; the backend lives entirely in the .cpp.
 	class InferenceEngine
@@ -25,7 +49,7 @@ namespace YirangOnnx
 		InferenceEngine(const InferenceEngine&) = delete;
 		auto operator=(const InferenceEngine&) -> InferenceEngine& = delete;
 
-		auto load(const std::string& model_path) -> std::expected<void, std::string>;
+		auto load(const std::string& model_path, const SessionTuning& tuning = {}) -> std::expected<void, std::string>;
 		auto loaded(void) const -> bool;
 
 		auto run(const std::vector<Tensor>& inputs) const -> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>;

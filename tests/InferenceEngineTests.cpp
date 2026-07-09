@@ -119,6 +119,38 @@ TEST(InferenceEngineTest, RunsModelEndToEndAndReusesSession)
 	std::filesystem::remove(path, ec);
 }
 
+TEST(InferenceEngineTest, RunsWithSessionTuning)
+{
+	const auto path = std::filesystem::temp_directory_path() / "yirang_engine_tuned.onnx";
+	write_sample_model(path);
+
+	SessionTuning tuning;
+	tuning.intra_op_threads_ = 1;
+	tuning.inter_op_threads_ = 1;
+	tuning.enable_mem_pattern_ = false;
+	tuning.enable_cpu_mem_arena_ = false;
+	tuning.execution_mode_ = ExecutionMode::parallel;
+	tuning.graph_optimization_ = GraphOptimization::disabled;
+
+	InferenceEngine engine;
+	auto loaded = engine.load(path.string(), tuning);
+	ASSERT_TRUE(loaded.has_value()) << (loaded.has_value() ? "" : loaded.error());
+
+	auto [outputs, error] = engine.run({ make_input() });
+	ASSERT_TRUE(outputs.has_value()) << error.value_or("");
+	ASSERT_EQ(outputs->size(), 1u);
+
+	const auto& z = outputs->front();
+	ASSERT_EQ(z.data_.size(), 2u * sizeof(float));
+	float values[2];
+	std::memcpy(values, z.data_.data(), sizeof(values));
+	EXPECT_FLOAT_EQ(values[0], 4.0f);
+	EXPECT_FLOAT_EQ(values[1], 6.0f);
+
+	std::error_code ec;
+	std::filesystem::remove(path, ec);
+}
+
 TEST(InferenceEngineTest, RunWithoutLoadFails)
 {
 	const InferenceEngine engine;

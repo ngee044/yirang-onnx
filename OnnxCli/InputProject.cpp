@@ -2,9 +2,14 @@
 
 #include "Converter.h"
 #include "File.h"
+#include "InputBuilder.h"
+#include "ModelTypes.h"
 
+#include <cstddef>
 #include <format>
+#include <initializer_list>
 #include <limits>
+#include <string_view>
 #include <utility>
 
 #include <boost/json.hpp>
@@ -24,6 +29,32 @@ namespace YirangOnnx
 			if (value.is_uint64() && value.as_uint64() <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
 			{
 				return static_cast<int64_t>(value.as_uint64());
+			}
+			return std::nullopt;
+		}
+
+		auto find_unknown_key(const boost::json::object& object, std::initializer_list<std::string_view> allowed) -> std::optional<std::string>
+		{
+			for (const auto& entry : object)
+			{
+				const std::string key(entry.key());
+				if (!key.empty() && key.front() == '_')
+				{
+					continue;
+				}
+				bool known = false;
+				for (const auto& candidate : allowed)
+				{
+					if (key == candidate)
+					{
+						known = true;
+						break;
+					}
+				}
+				if (!known)
+				{
+					return key;
+				}
 			}
 			return std::nullopt;
 		}
@@ -82,6 +113,11 @@ namespace YirangOnnx
 		}
 		const auto& root = parsed.as_object();
 
+		if (auto unknown = find_unknown_key(root, { "model", "inspect", "inputs", "dim_overrides", "run", "outputs" }); unknown.has_value())
+		{
+			return fail(std::format("unknown key '{}'", unknown.value()));
+		}
+
 		InputProject project;
 
 		if (const auto* model = root.if_contains("model"))
@@ -101,6 +137,10 @@ namespace YirangOnnx
 			}
 			InspectSpec spec;
 			const auto& entry = inspect->as_object();
+			if (auto unknown = find_unknown_key(entry, { "format", "out", "weights" }); unknown.has_value())
+			{
+				return fail(std::format("unknown key 'inspect.{}'", unknown.value()));
+			}
 			if (const auto* format = entry.if_contains("format"))
 			{
 				if (!format->is_string())
@@ -151,6 +191,10 @@ namespace YirangOnnx
 				else if (item.is_object())
 				{
 					const auto& entry = item.as_object();
+					if (auto unknown = find_unknown_key(entry, { "name", "path", "random" }); unknown.has_value())
+					{
+						return fail(std::format("unknown key 'inputs[{}].{}'", index, unknown.value()));
+					}
 					if (const auto* name = entry.if_contains("name"))
 					{
 						if (!name->is_string())
@@ -175,6 +219,10 @@ namespace YirangOnnx
 						}
 						RandomInputSpec random_spec;
 						const auto& random_entry = random->as_object();
+						if (auto unknown = find_unknown_key(random_entry, { "data_type", "shape", "seed" }); unknown.has_value())
+						{
+							return fail(std::format("unknown key 'inputs[{}].random.{}'", index, unknown.value()));
+						}
 						if (const auto* data_type = random_entry.if_contains("data_type"))
 						{
 							if (!data_type->is_string())
@@ -182,6 +230,17 @@ namespace YirangOnnx
 								return fail(std::format("'inputs[{}].random.data_type' must be a string", index));
 							}
 							random_spec.data_type_ = data_type->as_string().c_str();
+
+							auto dtype_id = data_type_id(random_spec.data_type_);
+							if (!dtype_id.has_value())
+							{
+								return fail(std::format("'inputs[{}].random.data_type' unknown type '{}'", index, random_spec.data_type_));
+							}
+							if (!random_generation_supports(dtype_id.value()))
+							{
+								return fail(std::format("'inputs[{}].random.data_type' '{}' is not supported for random generation (use FLOAT|DOUBLE|INT32|INT64|BOOL)",
+														index, random_spec.data_type_));
+							}
 						}
 						if (const auto* shape = random_entry.if_contains("shape"))
 						{
@@ -189,6 +248,7 @@ namespace YirangOnnx
 							{
 								return fail(std::format("'inputs[{}].random.shape' must be an array", index));
 							}
+							size_t element_count = 1;
 							for (const auto& dim : shape->as_array())
 							{
 								auto value = to_int64(dim);
@@ -196,6 +256,12 @@ namespace YirangOnnx
 								{
 									return fail(std::format("'inputs[{}].random.shape' entries must be positive integers", index));
 								}
+								const size_t magnitude = static_cast<size_t>(value.value());
+								if (element_count > kMaxTensorElements / magnitude)
+								{
+									return fail(std::format("'inputs[{}].random.shape' element count exceeds limit {}", index, kMaxTensorElements));
+								}
+								element_count *= magnitude;
 								random_spec.shape_.push_back(value.value());
 							}
 						}
@@ -262,21 +328,26 @@ namespace YirangOnnx
 				return fail("'run' must be an object");
 			}
 			const auto& entry = run->as_object();
+			if (auto unknown = find_unknown_key(entry, { "repeat", "warmup" }); unknown.has_value())
+			{
+				return fail(std::format("unknown key 'run.{}'", unknown.value()));
+			}
+			constexpr int64_t max_iterations = 1'000'000;
 			if (const auto* repeat = entry.if_contains("repeat"))
 			{
 				auto value = to_int64(*repeat);
-				if (!value.has_value() || value.value() < 1 || value.value() > std::numeric_limits<uint32_t>::max())
+				if (!value.has_value() || value.value() < 1 || value.value() > max_iterations)
 				{
-					return fail("'run.repeat' must be a positive integer");
+					return fail(std::format("'run.repeat' must be an integer in [1, {}]", max_iterations));
 				}
 				project.run_.repeat_ = static_cast<uint32_t>(value.value());
 			}
 			if (const auto* warmup = entry.if_contains("warmup"))
 			{
 				auto value = to_int64(*warmup);
-				if (!value.has_value() || value.value() < 0 || value.value() > std::numeric_limits<uint32_t>::max())
+				if (!value.has_value() || value.value() < 0 || value.value() > max_iterations)
 				{
-					return fail("'run.warmup' must be a non-negative integer");
+					return fail(std::format("'run.warmup' must be an integer in [0, {}]", max_iterations));
 				}
 				project.run_.warmup_ = static_cast<uint32_t>(value.value());
 			}
@@ -290,6 +361,10 @@ namespace YirangOnnx
 				return fail("'outputs' must be an object");
 			}
 			const auto& entry = outputs->as_object();
+			if (auto unknown = find_unknown_key(entry, { "dir", "save", "dump_json", "stats" }); unknown.has_value())
+			{
+				return fail(std::format("unknown key 'outputs.{}'", unknown.value()));
+			}
 			if (const auto* dir = entry.if_contains("dir"))
 			{
 				if (!dir->is_string())

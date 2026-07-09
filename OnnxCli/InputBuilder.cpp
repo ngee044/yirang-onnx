@@ -10,6 +10,21 @@
 
 namespace YirangOnnx
 {
+	auto random_generation_supports(int32_t elem_type) -> bool
+	{
+		switch (elem_type)
+		{
+		case onnx::TensorProto::FLOAT:
+		case onnx::TensorProto::DOUBLE:
+		case onnx::TensorProto::INT32:
+		case onnx::TensorProto::INT64:
+		case onnx::TensorProto::BOOL:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	auto resolve_input_shape(const ValueInfo& input, const std::map<std::string, int64_t>& dim_overrides)
 		-> std::tuple<std::optional<ResolvedShape>, std::optional<std::string>>
 	{
@@ -50,7 +65,12 @@ namespace YirangOnnx
 			{
 				return { std::nullopt, std::format("input '{}': non-positive dimension {}", name, dim) };
 			}
-			count *= static_cast<size_t>(dim);
+			const size_t magnitude = static_cast<size_t>(dim);
+			if (count > kMaxTensorElements / magnitude)
+			{
+				return { std::nullopt, std::format("input '{}': tensor element count exceeds limit {}", name, kMaxTensorElements) };
+			}
+			count *= magnitude;
 		}
 
 		Tensor tensor;
