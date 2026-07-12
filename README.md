@@ -30,6 +30,8 @@ yirang-onnx는 공식 `onnx.proto` 스키마를 벤더링하고 `protoc`로 C++ 
 - **랜덤 입력 생성**: `inputs` 생략 또는 `random` 스펙으로 그래프 입력 형상·dtype에 맞는 텐서를 자동 생성(FLOAT/DOUBLE/INT32/INT64/BOOL, seed 재현성, 심볼릭 차원은 `dim_overrides`).
 - **벤치마크**: `run.warmup`/`run.repeat`로 반복 실행, avg/min/max ms 보고. 엔진은 세션을 1회 로드 후 재사용(`InferenceEngine::load/run` 분리).
 - **출력 후처리**: 출력별 통계(min/max/mean), `.pb` 저장 토글, JSON 값 덤프(`dump_json`).
+- **세션 튜닝**: 설정 파일에서 ONNX Runtime 세션 옵션(`intra_op_threads`/`inter_op_threads`, `enable_mem_pattern`, `enable_cpu_mem_arena`, `execution_mode`, `graph_optimization`)을 지정. 미지정 시 ORT 기본값을 유지하고, 적용된 값은 추론 시 로그로 보고.
+- **입력 검증**: 잡 스크립트는 **엄격 검증**(알 수 없는 키 거부 → exit 2로 오타 차단, `_` 접두어는 주석 예외; `random.data_type`·과대 `shape`·`repeat`/`warmup` 상한을 파스 시점에 거부). 엔진 설정 파일은 **비치명 경고**(타입 불일치·범위 이탈·미지 키는 경고 후 기본값으로 진행 — 어떤 값도 프로세스를 중단시키지 않음).
 - 파일 로드(`OnnxModel::load`) 또는 인메모리 버퍼 파싱(`OnnxModel::parse`). ONNX proto2 스키마(v1.17.0) 기반으로 opset에 무관하게 추출.
 - 3종 출력 포맷: `summary`(텍스트, 파라미터 총수·총 바이트 포함), `json`(분석 — 노드 속성 값·external_data·총계 포함), `dot`(시각화 — 그래프 입출력 노드 표시). `--weights`로 초기화자(가중치) **실제 값**을 JSON에 포함. 서브그래프(If/Loop)의 노드는 히스토그램·노드 수에 합산.
 - **추론 엔진**(`OnnxInference`, 별도 라이브러리·상시 빌드): ONNX Runtime으로 `.onnx` + 입력 텐서 → 출력. 파서와 protobuf-free `Tensor` 계약으로만 접점(느슨한 결합, MSA 지향).
@@ -106,6 +108,26 @@ cmake --build build -j
 - `build/lib/libOnnxInference.a` — 추론 엔진
 - `build/out/onnx_parser_tests` — 테스트
 
+## 빠른 시작 (examples)
+
+`examples/`에 바로 실행 가능한 최소 예제가 커밋되어 있습니다 — 작은 선형 모델
+(`models/linear.onnx`, `y = x·W + b`), 고정 입력 텐서(`tensors/input.pb`), 잡 스크립트 4종.
+잡 스크립트의 상대 경로가 이 디렉터리 기준이므로 `examples/` 안에서 실행합니다.
+
+```bash
+cd examples
+BIN=../build/out/yirang-onnx
+
+"$BIN" --model models/linear.onnx        # 분석: 요약
+"$BIN" --input-script job_auto.json      # 추론: 전 그래프 입력 자동 랜덤
+"$BIN" --input-script job_seed.json      # 추론: seed 고정 (두 번 실행 → 동일 결과)
+"$BIN" --input-script job_bench.json     # 추론: 배치 [8,4] + repeat 100/warmup 10 벤치마크
+"$BIN" --input-script job_path.json      # 추론: 실제 .pb 입력
+```
+
+모델·입력은 `make_linear.py`·`make_input.py`(`pip install onnx numpy`)로 재생성할 수 있습니다.
+자세한 설명은 [`examples/README.md`](examples/README.md)를 참고하세요.
+
 ## 사용법 (CLI)
 
 ### 잡 스크립트 구동 (`--input-script`, 권장)
@@ -172,8 +194,11 @@ build/out/yirang-onnx --model model.onnx --input input.pb --out-dir outputs
 각 그래프 출력이 `<out-dir>/<name>.pb`로 저장됩니다.
 
 선택적 설정 파일: 바이너리 옆에 `yirang_onnx_configurations.json`을 두면 **정적 엔진
-설정**(app_title/log_root_path/write_console/write_file/write_interval)의 기본값을 지정할
-수 있습니다. 예시는 `OnnxCli/yirang_onnx_configurations.sample.json` 참고.
+설정**(app_title/log_root_path/write_console/write_file/write_interval)과 **ONNX Runtime
+세션 튜닝**(intra/inter_op_threads·enable_mem_pattern·enable_cpu_mem_arena·execution_mode·
+graph_optimization)의 기본값을 지정할 수 있습니다. 이 파일 검증은 비치명적이라 잘못된
+값은 경고만 남기고 기본값으로 진행합니다(엔진 구동을 막지 않음). 예시는
+`OnnxCli/yirang_onnx_configurations.sample.json` 참고.
 
 요약 출력 예시:
 
@@ -229,12 +254,15 @@ CMake 타겟 `OnnxParser`를 링크하면 생성된 proto, protobuf, CppToolkit 
 ctest --test-dir build --output-on-failure
 ```
 
-GoogleTest 스위트(`tests/`, 38개)는 파서(파싱·추출·속성 값·서브그래프·external_data·
+GoogleTest 스위트(`tests/`, 53개)는 파서(파싱·추출·속성 값·서브그래프·external_data·
 파라미터 총계·렌더링·오류 경로), CLI 설정(`Configurations` 기본값/CLI 파싱/엔진 설정 로드/
-`--input-script`/`--help`·`--version`/손상 설정 경고), 잡 스크립트(`InputProject` 전체
-스키마/축약형/오류 거부), 랜덤 입력(`InputBuilder` 형상 해석/시드 재현성/미지원 dtype),
-**추론 end-to-end**(`InferenceEngine` 세션 재사용·값 정확성·오류 경로),
-TensorProto↔Tensor 변환(`TensorConvert` 왕복/미지원 dtype 거부)을 검증합니다.
+`--input-script`/`--help`·`--version`/손상 설정 경고 + **비치명 검증**: 타입 불일치·로그 레벨
+범위·미지 키 경고·비정수 값 크래시 안전성 + **세션 튜닝** 파싱·검증), 잡 스크립트
+(`InputProject` 전체 스키마/축약형/오류 거부 + **엄격 검증**: 미지 키 거부·`_` 주석 허용·
+불량 dtype·과대 shape·repeat 상한), 랜덤 입력(`InputBuilder` 형상 해석/시드 재현성/미지원
+dtype/과대 shape 거부), **추론 end-to-end**(`InferenceEngine` 세션 재사용·값 정확성·오류
+경로·세션 튜닝 적용), TensorProto↔Tensor 변환(`TensorConvert` 왕복/미지원 dtype 거부)을
+검증합니다.
 
 ## 디렉터리 레이아웃
 
@@ -244,10 +272,10 @@ yirang-onnx/
 ├── OnnxInference/  # 추론 엔진 (InferenceEngine, Tensor) — ONNX Runtime
 ├── OnnxCli/        # CLI (yirang-onnx): Configurations + InputProject + InputBuilder + TensorConvert(OnnxCliCore) + RunCommand + main
 ├── tests/          # GoogleTest 스위트
+├── examples/       # 실행 가능한 예제 (linear.onnx + 잡 스크립트 4종 + 입력 텐서)
 ├── proto/          # 벤더링된 onnx.proto (ONNX v1.17.0, Apache-2.0)
 ├── .CppToolkit/    # CppToolkit 서브모듈 (Utilities 모듈 사용)
 ├── cmake/vcpkg-triplets/  # 커밋된 overlay 트리플릿 + chainload 툴체인 (Homebrew LLVM)
-├── docs/           # 코딩 규약 · CppToolkit 모듈 사용 가이드
 ├── build.sh        # vcpkg + Ninja 빌드 (macOS 컴파일러 폴백 포함)
 ├── vcpkg.json      # 매니페스트 (protobuf, boost, lz4, efsw, gtest)
 ├── CMakePresets.json  # 커밋 프리셋 (default / macos-arm64) — VS Code / 신규 클론
@@ -256,10 +284,9 @@ yirang-onnx/
 
 ## 문서
 
-`docs/`에 코드 스타일과 CppToolkit 사용 규약 문서가 있습니다.
-
-- `CODING_CONVENTION.md` — 코드 스타일 규약
-- `module_usage_guide.md` — CppToolkit 사용 규약(flat include, 폴더 ≠ 타겟 ≠ 네임스페이스, vcpkg 패키지명 매핑)
+- [`examples/README.md`](examples/README.md) — 실행 가능한 예제와 단계별 실습.
+- **코드 스타일**: 후행 반환 타입(`auto f(void) -> Ret`), PascalCase 파일/클래스 · snake_case 함수/변수 · 멤버 `_` 접미사, 루트 `.clang-format`(GNU 기반, Tab 폭 4, 170 컬럼)에 위임. 오류는 예외 대신 `std::expected<void, string>` 또는 `tuple<optional<T>, optional<string>>` 반환값으로 표현.
+- **CppToolkit 소비 규약**: flat include(경로 접두어 금지), 폴더명 ≠ 링크 타겟명 ≠ 네임스페이스, vcpkg 패키지명 ≠ `find_package` 이름 ≠ 링크 타겟.
 
 ## 기술 스택
 

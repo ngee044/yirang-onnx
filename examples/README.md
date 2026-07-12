@@ -1,6 +1,6 @@
 # examples — yirang-onnx 실습 예제
 
-`yirang-onnx`를 바로 돌려볼 수 있는 최소 예제 세트입니다. 작은 선형 모델(`Gemm`, `y = x·W + b`)과 잡 스크립트가 들어 있습니다. 개념 설명과 단계별 해설은 `docs/hands_on_guide.md`를 참고하세요.
+`yirang-onnx`를 바로 돌려볼 수 있는 최소 예제 세트입니다. 작은 선형 모델(`Gemm`, `y = x·W + b`)과 잡 스크립트가 들어 있습니다. 전체 사용법은 리포 루트의 [`README.md`](../README.md)를 참고하세요.
 
 - 입력 `input`: FLOAT `[N, 4]` (`N`은 심볼릭 배치 차원)
 - initializer `W`[4,3], `b`[3] — 모델 내장 가중치(사용자 입력 아님)
