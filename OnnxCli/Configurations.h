@@ -1,8 +1,8 @@
 #pragma once
 
 #include "ArgumentParser.h"
-#include "InferenceEngine.h"
 #include "LogTypes.h"
+#include "SessionTuning.h"
 
 #include <cstdint>
 #include <optional>
@@ -18,6 +18,8 @@ namespace YirangOnnx
 	public:
 		Configurations(ArgumentParser&& arguments, const std::string& config_file_name = "yirang_onnx_configurations.json");
 		virtual ~Configurations(void);
+
+		static auto find_unknown_flag(const std::vector<std::string>& cli_arguments) -> std::optional<std::string>;
 
 		auto model_path(void) const -> std::string;
 		auto output_format(void) const -> std::string;

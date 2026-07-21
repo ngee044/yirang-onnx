@@ -14,6 +14,7 @@
 namespace YirangOnnx
 {
 	inline constexpr size_t kMaxTensorElements = static_cast<size_t>(1) << 30;
+	inline constexpr size_t kMaxTensorBytes = static_cast<size_t>(1) << 32;
 
 	struct ResolvedShape
 	{
@@ -22,6 +23,8 @@ namespace YirangOnnx
 	};
 
 	auto random_generation_supports(int32_t elem_type) -> bool;
+
+	auto random_element_byte_width(int32_t elem_type) -> size_t;
 
 	auto resolve_input_shape(const ValueInfo& input, const std::map<std::string, int64_t>& dim_overrides)
 		-> std::tuple<std::optional<ResolvedShape>, std::optional<std::string>>;

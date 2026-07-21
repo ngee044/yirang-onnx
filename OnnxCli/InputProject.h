@@ -42,6 +42,9 @@ namespace YirangOnnx
 		std::string format_ = "summary";
 		std::string out_path_;
 		bool include_weights_ = false;
+		bool has_format_ = false;
+		bool has_out_path_ = false;
+		bool has_include_weights_ = false;
 	};
 
 	class InputProject

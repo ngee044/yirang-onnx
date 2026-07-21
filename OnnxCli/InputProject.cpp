@@ -148,6 +148,7 @@ namespace YirangOnnx
 					return fail("'inspect.format' must be a string");
 				}
 				spec.format_ = format->as_string().c_str();
+				spec.has_format_ = true;
 			}
 			if (spec.format_ != "summary" && spec.format_ != "json" && spec.format_ != "dot")
 			{
@@ -160,6 +161,7 @@ namespace YirangOnnx
 					return fail("'inspect.out' must be a string");
 				}
 				spec.out_path_ = out->as_string().c_str();
+				spec.has_out_path_ = true;
 			}
 			if (const auto* weights = entry.if_contains("weights"))
 			{
@@ -168,6 +170,7 @@ namespace YirangOnnx
 					return fail("'inspect.weights' must be a boolean");
 				}
 				spec.include_weights_ = weights->as_bool();
+				spec.has_include_weights_ = true;
 			}
 			project.inspect_ = std::move(spec);
 		}
@@ -187,6 +190,10 @@ namespace YirangOnnx
 				if (item.is_string())
 				{
 					spec.path_ = item.as_string().c_str();
+					if (spec.path_.empty())
+					{
+						return fail(std::format("'inputs[{}]' must not be an empty path", index));
+					}
 				}
 				else if (item.is_object())
 				{
@@ -210,6 +217,10 @@ namespace YirangOnnx
 							return fail(std::format("'inputs[{}].path' must be a string", index));
 						}
 						spec.path_ = path->as_string().c_str();
+						if (spec.path_.empty())
+						{
+							return fail(std::format("'inputs[{}].path' must not be empty", index));
+						}
 					}
 					if (const auto* random = entry.if_contains("random"))
 					{
@@ -218,6 +229,7 @@ namespace YirangOnnx
 							return fail(std::format("'inputs[{}].random' must be an object", index));
 						}
 						RandomInputSpec random_spec;
+						std::optional<int32_t> parsed_dtype;
 						const auto& random_entry = random->as_object();
 						if (auto unknown = find_unknown_key(random_entry, { "data_type", "shape", "seed" }); unknown.has_value())
 						{
@@ -241,6 +253,7 @@ namespace YirangOnnx
 								return fail(std::format("'inputs[{}].random.data_type' '{}' is not supported for random generation (use FLOAT|DOUBLE|INT32|INT64|BOOL)",
 														index, random_spec.data_type_));
 							}
+							parsed_dtype = dtype_id.value();
 						}
 						if (const auto* shape = random_entry.if_contains("shape"))
 						{
@@ -263,6 +276,13 @@ namespace YirangOnnx
 								}
 								element_count *= magnitude;
 								random_spec.shape_.push_back(value.value());
+							}
+							if (parsed_dtype.has_value())
+							{
+								if (const size_t width = random_element_byte_width(parsed_dtype.value()); width != 0 && element_count > kMaxTensorBytes / width)
+								{
+									return fail(std::format("'inputs[{}].random' tensor byte size exceeds limit {} bytes", index, kMaxTensorBytes));
+								}
 							}
 						}
 						if (const auto* seed = random_entry.if_contains("seed"))
@@ -315,6 +335,10 @@ namespace YirangOnnx
 				if (!value.has_value() || value.value() < 1)
 				{
 					return fail(std::format("'dim_overrides.{}' must be a positive integer", std::string(kv.key())));
+				}
+				if (static_cast<size_t>(value.value()) > kMaxTensorElements)
+				{
+					return fail(std::format("'dim_overrides.{}' exceeds limit {}", std::string(kv.key()), kMaxTensorElements));
 				}
 				project.dim_overrides_[std::string(kv.key())] = value.value();
 			}

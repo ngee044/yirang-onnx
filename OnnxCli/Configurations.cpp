@@ -3,7 +3,9 @@
 #include "Converter.h"
 #include "File.h"
 
+#include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -34,6 +36,10 @@ namespace YirangOnnx
 		}
 
 		auto is_valid_log_level(int64_t value) -> bool { return value >= static_cast<int64_t>(LogTypes::None) && value <= static_cast<int64_t>(LogTypes::Packet); }
+
+		constexpr std::array<std::string_view, 14> known_cli_flags
+			= { "--input-script",	   "--model",		   "--format",		   "--out",	 "--weights", "--input", "--out-dir", "--title", "--log_root_path",
+				"--write_console_log", "--write_file_log", "--write_interval", "--help", "--version" };
 
 		constexpr int64_t max_thread_count = 4096;
 
@@ -326,8 +332,41 @@ namespace YirangOnnx
 		}
 	}
 
+	auto Configurations::find_unknown_flag(const std::vector<std::string>& cli_arguments) -> std::optional<std::string>
+	{
+		for (const auto& token : cli_arguments)
+		{
+			if (token.rfind("--", 0) != 0)
+			{
+				continue;
+			}
+			if (std::find(known_cli_flags.begin(), known_cli_flags.end(), token) == known_cli_flags.end())
+			{
+				return token;
+			}
+		}
+		return std::nullopt;
+	}
+
 	auto Configurations::parse(ArgumentParser& arguments) -> void
 	{
+		const auto parse_log_level = [&arguments, this](const std::string& key) -> std::optional<LogTypes>
+		{
+			auto raw = arguments.to_string(key);
+			if (!raw.has_value())
+			{
+				return std::nullopt;
+			}
+			int64_t level = 0;
+			auto [ptr, ec] = std::from_chars(raw->data(), raw->data() + raw->size(), level);
+			if (ec != std::errc() || ptr != raw->data() + raw->size() || !is_valid_log_level(level))
+			{
+				invalid_reason_ = std::format("invalid {} '{}' (expected an integer in [0, 8])", key, raw.value());
+				return std::nullopt;
+			}
+			return to_log_types(level);
+		};
+
 		if (auto value = arguments.to_string("--model"); value.has_value())
 		{
 			model_path_ = value.value();
@@ -364,13 +403,13 @@ namespace YirangOnnx
 		{
 			log_root_path_ = value.value();
 		}
-		if (auto value = arguments.to_int("--write_console_log"); value.has_value())
+		if (auto value = parse_log_level("--write_console_log"); value.has_value())
 		{
-			write_console_ = to_log_types(value.value());
+			write_console_ = value.value();
 		}
-		if (auto value = arguments.to_int("--write_file_log"); value.has_value())
+		if (auto value = parse_log_level("--write_file_log"); value.has_value())
 		{
-			write_file_ = to_log_types(value.value());
+			write_file_ = value.value();
 		}
 		if (auto value = arguments.to_ushort("--write_interval"); value.has_value())
 		{
@@ -385,6 +424,8 @@ namespace YirangOnnx
 	{
 		if (write_interval_ < 100)
 		{
+			const std::string note = std::format("write_interval {} raised to the 100 ms minimum", write_interval_);
+			load_warning_ = load_warning_.has_value() ? std::format("{}; {}", load_warning_.value(), note) : note;
 			write_interval_ = 100;
 		}
 

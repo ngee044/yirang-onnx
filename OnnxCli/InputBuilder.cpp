@@ -25,6 +25,25 @@ namespace YirangOnnx
 		}
 	}
 
+	auto random_element_byte_width(int32_t elem_type) -> size_t
+	{
+		switch (elem_type)
+		{
+		case onnx::TensorProto::FLOAT:
+			return sizeof(float);
+		case onnx::TensorProto::DOUBLE:
+			return sizeof(double);
+		case onnx::TensorProto::INT32:
+			return sizeof(int32_t);
+		case onnx::TensorProto::INT64:
+			return sizeof(int64_t);
+		case onnx::TensorProto::BOOL:
+			return 1;
+		default:
+			return 0;
+		}
+	}
+
 	auto resolve_input_shape(const ValueInfo& input, const std::map<std::string, int64_t>& dim_overrides)
 		-> std::tuple<std::optional<ResolvedShape>, std::optional<std::string>>
 	{
@@ -33,16 +52,16 @@ namespace YirangOnnx
 		{
 			int64_t value = 0;
 			auto [ptr, ec] = std::from_chars(dim.data(), dim.data() + dim.size(), value);
-			if (ec == std::errc() && ptr == dim.data() + dim.size())
+			const bool numeric = (ec == std::errc() && ptr == dim.data() + dim.size());
+			if (numeric && value >= 1)
 			{
-				if (value < 1)
-				{
-					return { std::nullopt, std::format("input '{}': dimension '{}' is not positive", input.name_, dim) };
-				}
 				resolved.dims_.push_back(value);
 				continue;
 			}
 
+			// A symbolic dim (dim_param) OR a non-positive fixed dim (some exporters
+			// write dynamic axes as -1/0) is treated as dynamic: bind via dim_overrides
+			// or fall back to 1 with a note.
 			if (auto found = dim_overrides.find(dim); found != dim_overrides.end())
 			{
 				resolved.dims_.push_back(found->second);
@@ -50,7 +69,8 @@ namespace YirangOnnx
 			}
 
 			resolved.dims_.push_back(1);
-			resolved.notes_.push_back(std::format("input '{}': symbolic dimension '{}' -> 1 (set dim_overrides to change)", input.name_, dim));
+			const char* kind = numeric ? "dynamic" : "symbolic";
+			resolved.notes_.push_back(std::format("input '{}': {} dimension '{}' -> 1 (set dim_overrides to change)", input.name_, kind, dim));
 		}
 		return { std::move(resolved), std::nullopt };
 	}
@@ -71,6 +91,11 @@ namespace YirangOnnx
 				return { std::nullopt, std::format("input '{}': tensor element count exceeds limit {}", name, kMaxTensorElements) };
 			}
 			count *= magnitude;
+		}
+
+		if (const size_t width = random_element_byte_width(elem_type); width != 0 && count > kMaxTensorBytes / width)
+		{
+			return { std::nullopt, std::format("input '{}': tensor byte size exceeds limit {} bytes", name, kMaxTensorBytes) };
 		}
 
 		Tensor tensor;
