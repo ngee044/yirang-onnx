@@ -8,11 +8,13 @@
 #include "Logger.h"
 
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #ifndef YIRANG_ONNX_VERSION
 #define YIRANG_ONNX_VERSION "0.0.0"
@@ -25,14 +27,17 @@ namespace
 {
 	auto print_usage(LogTypes level) -> void
 	{
-		Logger::handle().write(level, "usage:\n"
-									  "  script  : yirang-onnx --input-script <input_project.json> [--model <path.onnx>]\n"
-									  "  inspect : yirang-onnx --model <path.onnx> [--format summary|json|dot] [--out <path>] [--weights true]\n"
-									  "  infer   : yirang-onnx --model <path.onnx> --input <in.pb>[,<in2.pb>] [--out-dir <dir>]\n"
-									  "  common  : [--title <name>] [--log_root_path <dir>] [--write_console_log <LogTypes>] [--write_file_log <LogTypes>] [--help] "
-									  "[--version]\n"
-									  "input_project.json: { model, inspect{format,out,weights}, inputs[ path | {name,path} | {name,random{data_type,shape,seed}} ],\n"
-									  "                      dim_overrides{symbol:dim}, run{repeat,warmup}, outputs{dir,save,dump_json,stats} }");
+		Logger::handle().write(level,
+							   "usage:\n"
+							   "  script  : yirang-onnx --input-script <input_project.json> [--model <path.onnx>]\n"
+							   "  inspect : yirang-onnx --model <path.onnx> [--format summary|json|dot] [--out <path>] [--weights true]\n"
+							   "  infer   : yirang-onnx --model <path.onnx> --input <in.pb>[,<in2.pb>] [--out-dir <dir>]\n"
+							   "  common  : [--title <name>] [--log_root_path <dir>] [--write_console_log <0-8>] [--write_file_log <0-8>] [--write_interval <ms>] "
+							   "[--help] [--version]\n"
+							   "  log level ints: 0=None 2=Error 3=Warning 4=Information (5+ debug/verbose)\n"
+							   "input_project.json: { model, inspect{format,out,weights}, inputs[ path | {name,path} | {name,random{data_type,shape,seed}} | {name} ],\n"
+							   "                      dim_overrides{symbol:dim}, run{repeat,warmup}, outputs{dir,save,dump_json,stats} }\n"
+							   "  inputs: omit entirely to auto-generate random tensors for every graph input; {name} alone means random defaults for that input.");
 	}
 
 	auto render(const OnnxModel& model, const std::string& format, bool include_weights) -> std::string
@@ -84,9 +89,24 @@ namespace
 		return specs;
 	}
 
+	auto resolve_script_path(const std::string& script_dir, const std::string& path) -> std::string
+	{
+		if (path.empty() || script_dir.empty())
+		{
+			return path;
+		}
+		std::filesystem::path candidate(path);
+		if (candidate.is_absolute())
+		{
+			return path;
+		}
+		return (std::filesystem::path(script_dir) / candidate).string();
+	}
+
 	auto execute(const Configurations& configurations) -> int
 	{
 		std::optional<InputProject> project;
+		std::string script_dir;
 		if (!configurations.input_script().empty())
 		{
 			auto [loaded, error] = InputProject::load(configurations.input_script());
@@ -96,9 +116,11 @@ namespace
 				return 2;
 			}
 			project = std::move(loaded.value());
+			script_dir = std::filesystem::path(configurations.input_script()).parent_path().string();
 		}
 
-		const std::string model_path = (project.has_value() && !project->model_path().empty()) ? project->model_path() : configurations.model_path();
+		const bool model_from_script = project.has_value() && !project->model_path().empty();
+		const std::string model_path = model_from_script ? resolve_script_path(script_dir, project->model_path()) : configurations.model_path();
 		if (model_path.empty())
 		{
 			Logger::handle().write(LogTypes::Error, std::format("input script '{}' does not set 'model' and no --model was given", configurations.input_script()));
@@ -133,7 +155,24 @@ namespace
 		bool executed = false;
 		if (auto inspect = project->inspect(); inspect.has_value())
 		{
-			if (int code = run_inspect(model.value(), inspect.value()); code != 0)
+			InspectSpec spec = inspect.value();
+			if (!spec.has_format_)
+			{
+				spec.format_ = configurations.output_format();
+			}
+			if (!spec.has_out_path_)
+			{
+				spec.out_path_ = configurations.output_path();
+			}
+			else
+			{
+				spec.out_path_ = resolve_script_path(script_dir, spec.out_path_);
+			}
+			if (!spec.has_include_weights_)
+			{
+				spec.include_weights_ = configurations.include_weights();
+			}
+			if (int code = run_inspect(model.value(), spec); code != 0)
 			{
 				return code;
 			}
@@ -148,9 +187,20 @@ namespace
 			{
 				job.inputs_ = cli_input_specs(configurations);
 			}
+			else
+			{
+				for (auto& spec : job.inputs_)
+				{
+					spec.path_ = resolve_script_path(script_dir, spec.path_);
+				}
+			}
 			job.dim_overrides_ = project->dim_overrides();
 			job.run_ = project->run();
 			job.outputs_ = project->outputs();
+			if (!job.outputs_.dir_.empty())
+			{
+				job.outputs_.dir_ = resolve_script_path(script_dir, job.outputs_.dir_);
+			}
 			job.tuning_ = configurations.session_tuning();
 			if (job.outputs_.dir_.empty())
 			{
@@ -173,10 +223,27 @@ namespace
 
 auto main(int argc, char* argv[]) -> int
 {
+	const std::vector<std::string> cli_arguments(argv + 1, argv + argc);
+	const auto unknown_flag = Configurations::find_unknown_flag(cli_arguments);
+
 	auto configurations = std::make_shared<Configurations>(ArgumentParser(argc, argv));
 
-	Logger::handle().file_mode(configurations->write_file());
-	Logger::handle().console_mode(configurations->write_console());
+	const bool direct_output = configurations->show_version() || configurations->show_help() || configurations->invalid_reason().has_value() || unknown_flag.has_value();
+
+	LogTypes console_mode = configurations->write_console();
+	if (direct_output && console_mode < LogTypes::Information)
+	{
+		console_mode = LogTypes::Information;
+	}
+
+	LogTypes file_mode = configurations->write_file();
+	if (configurations->show_version() || configurations->show_help())
+	{
+		file_mode = LogTypes::None;
+	}
+
+	Logger::handle().file_mode(file_mode);
+	Logger::handle().console_mode(console_mode);
 	Logger::handle().write_interval(configurations->write_interval());
 	Logger::handle().log_root(configurations->log_root_path());
 
@@ -196,6 +263,12 @@ auto main(int argc, char* argv[]) -> int
 	else if (configurations->show_help())
 	{
 		print_usage(LogTypes::Information);
+	}
+	else if (unknown_flag.has_value())
+	{
+		Logger::handle().write(LogTypes::Error, std::format("unknown argument '{}'", unknown_flag.value()));
+		print_usage(LogTypes::Error);
+		exit_code = 2;
 	}
 	else if (auto reason = configurations->invalid_reason(); reason.has_value())
 	{
