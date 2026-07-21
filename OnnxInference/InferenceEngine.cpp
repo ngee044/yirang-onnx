@@ -1,6 +1,8 @@
 #include "InferenceEngine.h"
 
 #include <format>
+#include <memory>
+#include <numeric>
 
 #include <onnxruntime_cxx_api.h>
 
@@ -8,6 +10,14 @@ namespace YirangOnnx
 {
 	namespace
 	{
+		auto shared_env(void) -> std::shared_ptr<Ort::Env>
+		{
+			// ORT recommends one Env per process; share it across engines and
+			// defer creation until first load() so the constructor cannot throw.
+			static std::shared_ptr<Ort::Env> env = std::make_shared<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "yirang-onnx");
+			return env;
+		}
+
 		auto element_size(int32_t elem_type) -> size_t
 		{
 			switch (elem_type)
@@ -37,8 +47,9 @@ namespace YirangOnnx
 
 	struct InferenceEngine::Backend
 	{
-		Ort::Env env_{ ORT_LOGGING_LEVEL_WARNING, "yirang-onnx" };
+		std::shared_ptr<Ort::Env> env_;
 		std::optional<Ort::Session> session_;
+		std::vector<std::string> output_names_;
 	};
 
 	InferenceEngine::InferenceEngine(void) : backend_(std::make_unique<Backend>()) {}
@@ -51,8 +62,15 @@ namespace YirangOnnx
 
 	auto InferenceEngine::load(const std::string& model_path, const SessionTuning& tuning) -> std::expected<void, std::string>
 	{
+		if (backend_ == nullptr)
+		{
+			backend_ = std::make_unique<Backend>();
+		}
+
 		try
 		{
+			backend_->env_ = shared_env();
+
 			Ort::SessionOptions session_options;
 
 			if (tuning.intra_op_threads_.has_value())
@@ -108,7 +126,16 @@ namespace YirangOnnx
 				break;
 			}
 
-			backend_->session_.emplace(backend_->env_, model_path.c_str(), session_options);
+			backend_->session_.emplace(*backend_->env_, model_path.c_str(), session_options);
+
+			backend_->output_names_.clear();
+			Ort::AllocatorWithDefaultOptions allocator;
+			const size_t output_count = backend_->session_->GetOutputCount();
+			backend_->output_names_.reserve(output_count);
+			for (size_t i = 0; i < output_count; ++i)
+			{
+				backend_->output_names_.push_back(backend_->session_->GetOutputNameAllocated(i, allocator).get());
+			}
 			return {};
 		}
 		catch (const Ort::Exception& e)
@@ -145,23 +172,33 @@ namespace YirangOnnx
 			input_names.reserve(inputs.size());
 			for (const auto& tensor : inputs)
 			{
-				if (element_size(tensor.elem_type_) == 0)
+				const size_t elem = element_size(tensor.elem_type_);
+				if (elem == 0)
 				{
 					return { std::nullopt, std::format("input '{}': unsupported data_type {}", tensor.name_, tensor.elem_type_) };
+				}
+				size_t expected = elem;
+				for (int64_t dim : tensor.shape_)
+				{
+					if (dim < 0)
+					{
+						return { std::nullopt, std::format("input '{}': negative dimension {}", tensor.name_, dim) };
+					}
+					expected *= static_cast<size_t>(dim);
+				}
+				if (tensor.data_.size() != expected)
+				{
+					return { std::nullopt,
+							 std::format("input '{}': data size {} bytes does not match shape ({} bytes expected)", tensor.name_, tensor.data_.size(), expected) };
 				}
 				input_values.push_back(Ort::Value::CreateTensor(memory_info, const_cast<uint8_t*>(tensor.data_.data()), tensor.data_.size(), tensor.shape_.data(),
 																tensor.shape_.size(), static_cast<ONNXTensorElementDataType>(tensor.elem_type_)));
 				input_names.push_back(tensor.name_.c_str());
 			}
 
-			Ort::AllocatorWithDefaultOptions allocator;
-			const size_t output_count = session.GetOutputCount();
-			std::vector<std::string> output_names_str;
+			const std::vector<std::string>& output_names_str = backend_->output_names_;
 			std::vector<const char*> output_names;
-			for (size_t i = 0; i < output_count; ++i)
-			{
-				output_names_str.push_back(session.GetOutputNameAllocated(i, allocator).get());
-			}
+			output_names.reserve(output_names_str.size());
 			for (const auto& name : output_names_str)
 			{
 				output_names.push_back(name.c_str());

@@ -8,26 +8,26 @@ set(CORE_HEADER_FILES
 	Configurations.h
 	InputBuilder.h
 	InputProject.h
+	RunCommand.h
+	RunSupport.h
 	TensorConvert.h)
 
 set(CORE_SOURCE_FILES
 	Configurations.cpp
 	InputBuilder.cpp
 	InputProject.cpp
+	RunCommand.cpp
+	RunSupport.cpp
 	TensorConvert.cpp)
 
 add_library(${CORE_LIBRARY_NAME} STATIC ${CORE_HEADER_FILES} ${CORE_SOURCE_FILES})
 target_include_directories(${CORE_LIBRARY_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${CORE_LIBRARY_NAME} PUBLIC OnnxParser OnnxInference Utilities)
 
-set(HEADER_FILES
-	RunCommand.h)
-
 set(SOURCE_FILES
-	RunCommand.cpp
 	main.cpp)
 
-add_executable(${EXECUTABLE_NAME} ${HEADER_FILES} ${SOURCE_FILES})
+add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})
 set_target_properties(${EXECUTABLE_NAME} PROPERTIES OUTPUT_NAME yirang-onnx)
 
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${CORE_LIBRARY_NAME})

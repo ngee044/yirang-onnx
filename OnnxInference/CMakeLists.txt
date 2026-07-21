@@ -1,6 +1,6 @@
 set(LIBRARY_NAME OnnxInference)
 
-project(${LIBRARY_NAME} VERSION 0.1.0 LANGUAGES CXX)
+project(${LIBRARY_NAME} VERSION 0.2.0 LANGUAGES CXX)
 
 # Prebuilt ONNX Runtime (brew install onnxruntime). No CMake config is shipped,
 # so locate headers + lib directly. Override with -DONNXRUNTIME_ROOT=...
@@ -14,6 +14,7 @@ endif()
 
 set(HEADER_FILES
 	Tensor.h
+	SessionTuning.h
 	InferenceEngine.h)
 
 set(SOURCE_FILES

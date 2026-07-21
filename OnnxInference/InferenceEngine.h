@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SessionTuning.h"
 #include "Tensor.h"
 
 #include <expected>
@@ -11,32 +12,6 @@
 
 namespace YirangOnnx
 {
-	enum class ExecutionMode
-	{
-		sequential,
-		parallel
-	};
-
-	enum class GraphOptimization
-	{
-		disabled,
-		basic,
-		extended,
-		all
-	};
-
-	struct SessionTuning
-	{
-		std::optional<int> intra_op_threads_;
-		std::optional<int> inter_op_threads_;
-		bool enable_mem_pattern_ = true;
-		bool enable_cpu_mem_arena_ = true;
-		ExecutionMode execution_mode_ = ExecutionMode::sequential;
-		GraphOptimization graph_optimization_ = GraphOptimization::all;
-	};
-
-	// Runs ONNX models via ONNX Runtime. Kept free of onnxruntime headers so
-	// consumers only depend on Tensor; the backend lives entirely in the .cpp.
 	class InferenceEngine
 	{
 	public:

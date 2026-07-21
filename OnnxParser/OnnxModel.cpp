@@ -26,6 +26,7 @@ namespace YirangOnnx
 	namespace
 	{
 		constexpr size_t attribute_preview_limit = 16;
+		constexpr size_t weight_export_element_limit = static_cast<size_t>(1) << 24;
 
 		auto to_value_info(const onnx::ValueInfoProto& value) -> ValueInfo
 		{
@@ -57,7 +58,59 @@ namespace YirangOnnx
 					}
 				}
 			}
+			else if (value.has_type())
+			{
+				switch (value.type().value_case())
+				{
+				case onnx::TypeProto::kSequenceType:
+					if (value.type().sequence_type().has_elem_type() && value.type().sequence_type().elem_type().has_tensor_type())
+					{
+						info.data_type_ = std::format("SEQUENCE({})", data_type_name(value.type().sequence_type().elem_type().tensor_type().elem_type()));
+					}
+					else
+					{
+						info.data_type_ = "SEQUENCE";
+					}
+					break;
+				case onnx::TypeProto::kMapType:
+					info.data_type_ = "MAP";
+					break;
+				case onnx::TypeProto::kOptionalType:
+					info.data_type_ = "OPTIONAL";
+					break;
+				case onnx::TypeProto::kSparseTensorType:
+					info.data_type_ = "SPARSE_TENSOR";
+					break;
+				default:
+					break;
+				}
+			}
 			return info;
+		}
+
+		auto int32_field_logical_bytes(int32_t data_type, size_t count) -> size_t
+		{
+			switch (data_type)
+			{
+			case onnx::TensorProto::INT16:
+			case onnx::TensorProto::UINT16:
+			case onnx::TensorProto::FLOAT16:
+			case onnx::TensorProto::BFLOAT16:
+				return count * 2;
+			case onnx::TensorProto::INT8:
+			case onnx::TensorProto::UINT8:
+			case onnx::TensorProto::BOOL:
+			case onnx::TensorProto::FLOAT8E4M3FN:
+			case onnx::TensorProto::FLOAT8E4M3FNUZ:
+			case onnx::TensorProto::FLOAT8E5M2:
+			case onnx::TensorProto::FLOAT8E5M2FNUZ:
+				return count;
+			case onnx::TensorProto::INT4:
+			case onnx::TensorProto::UINT4:
+				return count;
+			default:
+				return count * sizeof(int32_t);
+			}
 		}
 
 		auto inline_byte_size(const onnx::TensorProto& tensor) -> size_t
@@ -69,15 +122,77 @@ namespace YirangOnnx
 
 			size_t bytes = 0;
 			bytes += static_cast<size_t>(tensor.float_data_size()) * sizeof(float);
-			bytes += static_cast<size_t>(tensor.int32_data_size()) * sizeof(int32_t);
+			bytes += int32_field_logical_bytes(tensor.data_type(), static_cast<size_t>(tensor.int32_data_size()));
 			bytes += static_cast<size_t>(tensor.int64_data_size()) * sizeof(int64_t);
 			bytes += static_cast<size_t>(tensor.double_data_size()) * sizeof(double);
-			bytes += static_cast<size_t>(tensor.uint64_data_size()) * sizeof(uint64_t);
+			bytes += static_cast<size_t>(tensor.uint64_data_size()) * (tensor.data_type() == onnx::TensorProto::UINT32 ? sizeof(uint32_t) : sizeof(uint64_t));
 			for (int i = 0; i < tensor.string_data_size(); ++i)
 			{
 				bytes += tensor.string_data(i).size();
 			}
 			return bytes;
+		}
+
+		auto is_valid_utf8(const std::string& text) -> bool
+		{
+			size_t i = 0;
+			while (i < text.size())
+			{
+				const auto lead = static_cast<unsigned char>(text[i]);
+				size_t length = 0;
+				if (lead < 0x80)
+				{
+					length = 1;
+				}
+				else if ((lead >> 5) == 0x06)
+				{
+					length = 2;
+				}
+				else if ((lead >> 4) == 0x0E)
+				{
+					length = 3;
+				}
+				else if ((lead >> 3) == 0x1E)
+				{
+					length = 4;
+				}
+				else
+				{
+					return false;
+				}
+				if (i + length > text.size())
+				{
+					return false;
+				}
+				for (size_t j = 1; j < length; ++j)
+				{
+					if ((static_cast<unsigned char>(text[i + j]) >> 6) != 0x02)
+					{
+						return false;
+					}
+				}
+				i += length;
+			}
+			return true;
+		}
+
+		auto printable_or_hex(const std::string& text) -> std::string
+		{
+			if (is_valid_utf8(text))
+			{
+				return text;
+			}
+			constexpr size_t hex_preview_limit = 16;
+			std::string hex = "0x";
+			for (size_t i = 0; i < text.size() && i < hex_preview_limit; ++i)
+			{
+				hex += std::format("{:02x}", static_cast<unsigned char>(text[i]));
+			}
+			if (text.size() > hex_preview_limit)
+			{
+				hex += "...";
+			}
+			return std::format("{} ({} bytes, non-UTF8)", hex, text.size());
 		}
 
 		auto escape_dot(const std::string& text) -> std::string
@@ -202,8 +317,8 @@ namespace YirangOnnx
 				info.value_ = std::format("{}", attribute.i());
 				break;
 			case onnx::AttributeProto::STRING:
-				info.strings_.push_back(attribute.s());
-				info.value_ = attribute.s();
+				info.strings_.push_back(printable_or_hex(attribute.s()));
+				info.value_ = printable_or_hex(attribute.s());
 				break;
 			case onnx::AttributeProto::TENSOR:
 				info.value_ = std::format("tensor {} {}", data_type_name(attribute.t().data_type()), tensor_dims_string(attribute.t()));
@@ -228,9 +343,9 @@ namespace YirangOnnx
 			case onnx::AttributeProto::STRINGS:
 				for (const auto& value : attribute.strings())
 				{
-					info.strings_.push_back(value);
+					info.strings_.push_back(printable_or_hex(value));
 				}
-				info.value_ = join_values(attribute.strings(), [](const std::string& value) { return std::format("'{}'", value); });
+				info.value_ = join_values(attribute.strings(), [](const std::string& value) { return std::format("'{}'", printable_or_hex(value)); });
 				break;
 			case onnx::AttributeProto::TENSORS:
 				info.value_ = std::format("{} tensors", attribute.tensors_size());
@@ -499,13 +614,20 @@ namespace YirangOnnx
 			return { std::nullopt, "ONNX buffer exceeds the 2GB protobuf message limit" };
 		}
 
-		OnnxModel model;
-		if (!model.model_.ParseFromArray(bytes.data(), static_cast<int>(bytes.size())))
+		try
 		{
-			return { std::nullopt, "failed to parse ONNX protobuf (not a valid ModelProto?)" };
-		}
+			OnnxModel model;
+			if (!model.model_.ParseFromArray(bytes.data(), static_cast<int>(bytes.size())))
+			{
+				return { std::nullopt, "failed to parse ONNX protobuf (not a valid ModelProto?)" };
+			}
 
-		return { std::move(model), std::nullopt };
+			return { std::move(model), std::nullopt };
+		}
+		catch (const std::exception& e)
+		{
+			return { std::nullopt, std::format("failed to parse ONNX protobuf: {}", e.what()) };
+		}
 	}
 
 	auto OnnxModel::metadata(void) const -> ModelMetadata
@@ -683,19 +805,19 @@ namespace YirangOnnx
 		const auto meta = metadata();
 		json::object meta_obj;
 		meta_obj["ir_version"] = meta.ir_version_;
-		meta_obj["producer_name"] = meta.producer_name_;
-		meta_obj["producer_version"] = meta.producer_version_;
-		meta_obj["domain"] = meta.domain_;
+		meta_obj["producer_name"] = printable_or_hex(meta.producer_name_);
+		meta_obj["producer_version"] = printable_or_hex(meta.producer_version_);
+		meta_obj["domain"] = printable_or_hex(meta.domain_);
 		meta_obj["model_version"] = meta.model_version_;
-		meta_obj["doc_string"] = meta.doc_string_;
-		meta_obj["graph_name"] = meta.graph_name_;
+		meta_obj["doc_string"] = printable_or_hex(meta.doc_string_);
+		meta_obj["graph_name"] = printable_or_hex(meta.graph_name_);
 		meta_obj["function_count"] = static_cast<int64_t>(meta.function_count_);
 
 		json::array opsets;
 		for (const auto& opset : meta.opset_imports_)
 		{
 			json::object entry;
-			entry["domain"] = opset.domain_;
+			entry["domain"] = printable_or_hex(opset.domain_);
 			entry["version"] = opset.version_;
 			opsets.push_back(std::move(entry));
 		}
@@ -705,8 +827,8 @@ namespace YirangOnnx
 		for (const auto& prop : meta.metadata_props_)
 		{
 			json::object entry;
-			entry["key"] = prop.key_;
-			entry["value"] = prop.value_;
+			entry["key"] = printable_or_hex(prop.key_);
+			entry["value"] = printable_or_hex(prop.value_);
 			props.push_back(std::move(entry));
 		}
 		meta_obj["metadata_props"] = std::move(props);
@@ -718,7 +840,7 @@ namespace YirangOnnx
 			for (const auto& value : values)
 			{
 				json::object entry;
-				entry["name"] = value.name_;
+				entry["name"] = printable_or_hex(value.name_);
 				entry["data_type"] = value.data_type_;
 				json::array shape;
 				for (const auto& dim : value.shape_)
@@ -752,21 +874,21 @@ namespace YirangOnnx
 			subgraph_nodes += node.subgraph_node_count_;
 
 			json::object entry;
-			entry["name"] = node.name_;
-			entry["op_type"] = node.op_type_;
-			entry["domain"] = node.domain_;
+			entry["name"] = printable_or_hex(node.name_);
+			entry["op_type"] = printable_or_hex(node.op_type_);
+			entry["domain"] = printable_or_hex(node.domain_);
 
 			json::array ins;
 			for (const auto& name : node.inputs_)
 			{
-				ins.push_back(json::value(name));
+				ins.push_back(json::value(printable_or_hex(name)));
 			}
 			entry["inputs"] = std::move(ins);
 
 			json::array outs;
 			for (const auto& name : node.outputs_)
 			{
-				outs.push_back(json::value(name));
+				outs.push_back(json::value(printable_or_hex(name)));
 			}
 			entry["outputs"] = std::move(outs);
 
@@ -843,7 +965,7 @@ namespace YirangOnnx
 			total_initializer_bytes += tensor.byte_size_;
 
 			json::object entry;
-			entry["name"] = tensor.name_;
+			entry["name"] = printable_or_hex(tensor.name_);
 			entry["data_type"] = tensor.data_type_;
 			json::array dims;
 			for (auto dim : tensor.dims_)
@@ -859,20 +981,33 @@ namespace YirangOnnx
 				json::object external;
 				for (const auto& kv : tensor.external_data_)
 				{
-					external[kv.key_] = kv.value_;
+					external[printable_or_hex(kv.key_)] = printable_or_hex(kv.value_);
 				}
 				entry["external_data"] = std::move(external);
 			}
 
 			if (include_initializer_data && model_.has_graph())
 			{
-				if (auto data = initializer_data_json(model_.graph().initializer(static_cast<int>(i))); data.has_value())
+				const auto& proto = model_.graph().initializer(static_cast<int>(i));
+				if (proto.has_data_location() && proto.data_location() == onnx::TensorProto::EXTERNAL)
 				{
-					entry["data"] = std::move(data.value());
+					entry["data_omitted"] = "external data (not loaded)";
+				}
+				else if (tensor.element_count() > weight_export_element_limit)
+				{
+					entry["data_omitted"] = std::format("too large to export ({} elements > {} limit)", tensor.element_count(), weight_export_element_limit);
+				}
+				else if (auto data = initializer_data_json(proto); !data.has_value())
+				{
+					entry["data_omitted"] = "value export unsupported for this dtype";
+				}
+				else if (data->empty() && tensor.element_count() > 0)
+				{
+					entry["data_omitted"] = "no inline data";
 				}
 				else
 				{
-					entry["data_omitted"] = "value export unsupported for this dtype";
+					entry["data"] = std::move(data.value());
 				}
 			}
 			init_array.push_back(std::move(entry));
@@ -949,6 +1084,10 @@ namespace YirangOnnx
 		{
 			for (const auto& output : node_list[i].outputs_)
 			{
+				if (output.empty())
+				{
+					continue;
+				}
 				producer[output] = i;
 			}
 		}
@@ -957,6 +1096,10 @@ namespace YirangOnnx
 		{
 			for (const auto& input : node_list[i].inputs_)
 			{
+				if (input.empty())
+				{
+					continue;
+				}
 				if (auto found = producer.find(input); found != producer.end())
 				{
 					out << std::format("\tn{} -> n{} [label=\"{}\"];\n", found->second, i, escape_dot(input));

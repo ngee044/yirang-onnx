@@ -1,6 +1,6 @@
 set(LIBRARY_NAME OnnxParser)
 
-project(${LIBRARY_NAME} VERSION 0.1.0 LANGUAGES CXX)
+project(${LIBRARY_NAME} VERSION 0.2.0 LANGUAGES CXX)
 
 find_package(protobuf CONFIG REQUIRED)
 

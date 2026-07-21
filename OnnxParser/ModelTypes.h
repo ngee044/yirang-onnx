@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -54,7 +55,16 @@ namespace YirangOnnx
 			size_t count = 1;
 			for (int64_t dim : dims_)
 			{
-				count *= (dim > 0) ? static_cast<size_t>(dim) : 0;
+				if (dim <= 0)
+				{
+					return 0;
+				}
+				const size_t magnitude = static_cast<size_t>(dim);
+				if (count > (std::numeric_limits<size_t>::max)() / magnitude)
+				{
+					return (std::numeric_limits<size_t>::max)();
+				}
+				count *= magnitude;
 			}
 			return count;
 		}
