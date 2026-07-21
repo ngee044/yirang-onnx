@@ -87,3 +87,25 @@ TEST(InputBuilderTest, ReportsRandomSupport)
 	EXPECT_FALSE(random_generation_supports(8));
 	EXPECT_FALSE(random_generation_supports(10));
 }
+
+TEST(InputBuilderTest, TreatsNonPositiveFixedDimAsDynamic)
+{
+	ValueInfo info;
+	info.name_ = "X";
+	info.data_type_ = "FLOAT";
+	info.elem_type_ = 1;
+	info.shape_ = { "-1", "4" };
+
+	// Without an override the -1 axis defaults to 1 with a note (not an error).
+	auto [resolved, error] = resolve_input_shape(info, {});
+	ASSERT_TRUE(resolved.has_value()) << error.value_or("");
+	ASSERT_EQ(resolved->dims_.size(), 2u);
+	EXPECT_EQ(resolved->dims_[0], 1);
+	EXPECT_EQ(resolved->dims_[1], 4);
+	EXPECT_FALSE(resolved->notes_.empty());
+
+	// The -1 axis can be bound via dim_overrides keyed by its literal string.
+	auto [bound, bound_error] = resolve_input_shape(info, { { "-1", 8 } });
+	ASSERT_TRUE(bound.has_value()) << bound_error.value_or("");
+	EXPECT_EQ(bound->dims_[0], 8);
+}

@@ -166,3 +166,26 @@ TEST(InferenceEngineTest, LoadFailsForMissingModel)
 	EXPECT_FALSE(loaded.has_value());
 	EXPECT_FALSE(engine.loaded());
 }
+
+TEST(InferenceEngineTest, RejectsInputDataSizeMismatch)
+{
+	const auto path = std::filesystem::temp_directory_path() / "yirang_engine_mismatch.onnx";
+	write_sample_model(path);
+
+	InferenceEngine engine;
+	ASSERT_TRUE(engine.load(path.string()).has_value());
+
+	Tensor bad;
+	bad.name_ = "X";
+	bad.elem_type_ = 1;
+	bad.shape_ = { 1, 2 };
+	bad.data_.resize(sizeof(float)); // one float, but shape wants two
+
+	auto [outputs, error] = engine.run({ bad });
+	EXPECT_FALSE(outputs.has_value());
+	ASSERT_TRUE(error.has_value());
+	EXPECT_NE(error->find("does not match shape"), std::string::npos);
+
+	std::error_code ec;
+	std::filesystem::remove(path, ec);
+}

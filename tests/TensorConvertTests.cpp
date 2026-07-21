@@ -111,3 +111,26 @@ TEST(TensorConvertTest, SerializesTensorToProto)
 	ASSERT_EQ(proto.raw_data().size(), tensor.data_.size());
 	EXPECT_EQ(std::memcmp(proto.raw_data().data(), values.data(), proto.raw_data().size()), 0);
 }
+
+TEST(TensorConvertTest, RejectsExternalDataTensor)
+{
+	auto proto = make_proto("E", onnx::TensorProto::FLOAT, { 2 });
+	proto.set_data_location(onnx::TensorProto::EXTERNAL);
+
+	auto [tensor, error] = tensor_from_proto(proto);
+	EXPECT_FALSE(tensor.has_value());
+	ASSERT_TRUE(error.has_value());
+	EXPECT_NE(error->find("external data"), std::string::npos);
+}
+
+TEST(TensorConvertTest, RejectsRawDataSizeMismatch)
+{
+	auto proto = make_proto("M", onnx::TensorProto::FLOAT, { 2 });
+	const float value = 1.0f;
+	proto.set_raw_data(&value, sizeof(value));
+
+	auto [tensor, error] = tensor_from_proto(proto);
+	EXPECT_FALSE(tensor.has_value());
+	ASSERT_TRUE(error.has_value());
+	EXPECT_NE(error->find("does not match shape"), std::string::npos);
+}

@@ -254,3 +254,25 @@ TEST(ConfigurationsTest, WarnsOnBrokenJson)
 	EXPECT_NE(configurations.load_warning()->find(config_name), std::string::npos);
 	EXPECT_FALSE(configurations.invalid_reason().has_value());
 }
+
+TEST(ConfigurationsTest, FindsUnknownCliFlag)
+{
+	EXPECT_EQ(Configurations::find_unknown_flag({ "--wieghts", "true" }), std::optional<std::string>("--wieghts"));
+	EXPECT_EQ(Configurations::find_unknown_flag({ "--model", "model.onnx", "--format", "json" }), std::nullopt);
+}
+
+TEST(ConfigurationsTest, RejectsNonNumericCliLogLevel)
+{
+	Configurations configurations(make_parser({ "--model", "model.onnx", "--write_console_log", "Information" }), missing_config);
+
+	ASSERT_TRUE(configurations.invalid_reason().has_value());
+	EXPECT_NE(configurations.invalid_reason()->find("--write_console_log"), std::string::npos);
+}
+
+TEST(ConfigurationsTest, RejectsOutOfRangeCliLogLevel)
+{
+	Configurations configurations(make_parser({ "--model", "model.onnx", "--write_file_log", "99" }), missing_config);
+
+	ASSERT_TRUE(configurations.invalid_reason().has_value());
+	EXPECT_NE(configurations.invalid_reason()->find("--write_file_log"), std::string::npos);
+}

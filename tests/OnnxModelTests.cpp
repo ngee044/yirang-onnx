@@ -369,3 +369,175 @@ TEST(OnnxModelTest, LoadsFromFileRoundTrip)
 	EXPECT_FALSE(missing.has_value());
 	EXPECT_TRUE(missing_error.has_value());
 }
+
+TEST(OnnxModelTest, ExportsInitializerWeightsAsJson)
+{
+	auto [model, error] = OnnxModel::parse(build_sample_model());
+	ASSERT_TRUE(model.has_value()) << error.value_or("");
+
+	const std::string json = model->to_json(true);
+	EXPECT_NE(json.find("\"data\""), std::string::npos);
+	EXPECT_NE(json.find("1"), std::string::npos);
+	EXPECT_NE(json.find("4"), std::string::npos);
+}
+
+TEST(OnnxModelTest, ExternalInitializerWeightsMarkedNotLoaded)
+{
+	auto [model, error] = OnnxModel::parse(build_external_model());
+	ASSERT_TRUE(model.has_value()) << error.value_or("");
+
+	const std::string json = model->to_json(true);
+	EXPECT_NE(json.find("external data (not loaded)"), std::string::npos);
+	EXPECT_EQ(json.find("\"data\":"), std::string::npos);
+}
+
+TEST(OnnxModelTest, NarrowTypedInitializerByteSizeNotInflated)
+{
+	onnx::ModelProto model;
+	model.set_ir_version(9);
+	auto* graph = model.mutable_graph();
+	graph->set_name("fp16_graph");
+
+	auto* weight = graph->add_initializer();
+	weight->set_name("W16");
+	weight->set_data_type(onnx::TensorProto::FLOAT16);
+	weight->add_dims(4);
+	for (int i = 0; i < 4; ++i)
+	{
+		weight->add_int32_data(0);
+	}
+
+	std::string serialized;
+	model.SerializeToString(&serialized);
+
+	auto [parsed, error] = OnnxModel::parse(std::vector<uint8_t>(serialized.begin(), serialized.end()));
+	ASSERT_TRUE(parsed.has_value()) << error.value_or("");
+
+	const auto inits = parsed->initializers();
+	ASSERT_EQ(inits.size(), 1u);
+	EXPECT_EQ(inits.front().byte_size_, 4u * 2u);
+}
+
+TEST(OnnxModelTest, DotSkipsEmptyOptionalNames)
+{
+	onnx::ModelProto model;
+	model.set_ir_version(9);
+	auto* graph = model.mutable_graph();
+	graph->set_name("optional_graph");
+
+	auto* first = graph->add_node();
+	first->set_op_type("A");
+	first->add_input("in");
+	first->add_output("");
+
+	auto* second = graph->add_node();
+	second->set_op_type("B");
+	second->add_input("");
+	second->add_output("out");
+
+	std::string serialized;
+	model.SerializeToString(&serialized);
+
+	auto [parsed, error] = OnnxModel::parse(std::vector<uint8_t>(serialized.begin(), serialized.end()));
+	ASSERT_TRUE(parsed.has_value()) << error.value_or("");
+
+	const std::string dot = parsed->to_dot();
+	EXPECT_EQ(dot.find("n0 -> n1"), std::string::npos);
+}
+
+TEST(OnnxModelTest, ReportsNonTensorInputType)
+{
+	onnx::ModelProto model;
+	model.set_ir_version(9);
+	auto* graph = model.mutable_graph();
+	graph->set_name("sequence_graph");
+
+	auto* input = graph->add_input();
+	input->set_name("seq_in");
+	auto* seq = input->mutable_type()->mutable_sequence_type()->mutable_elem_type()->mutable_tensor_type();
+	seq->set_elem_type(onnx::TensorProto::FLOAT);
+
+	std::string serialized;
+	model.SerializeToString(&serialized);
+
+	auto [parsed, error] = OnnxModel::parse(std::vector<uint8_t>(serialized.begin(), serialized.end()));
+	ASSERT_TRUE(parsed.has_value()) << error.value_or("");
+
+	const auto in_list = parsed->inputs();
+	ASSERT_EQ(in_list.size(), 1u);
+	EXPECT_NE(in_list.front().data_type_.find("SEQUENCE"), std::string::npos);
+}
+
+TEST(OnnxModelTest, NonUtf8StringAttributeRendersHex)
+{
+	onnx::ModelProto model;
+	model.set_ir_version(9);
+	auto* graph = model.mutable_graph();
+	graph->set_name("bytes_attr_graph");
+
+	auto* node = graph->add_node();
+	node->set_op_type("Custom");
+	node->add_output("Y");
+	auto* attr = node->add_attribute();
+	attr->set_name("blob");
+	attr->set_type(onnx::AttributeProto::STRING);
+	const char bytes[] = { static_cast<char>(0xFF), static_cast<char>(0xFE), 0x00, 0x01 };
+	attr->set_s(std::string(bytes, sizeof(bytes)));
+
+	std::string serialized;
+	model.SerializeToString(&serialized);
+
+	auto [parsed, error] = OnnxModel::parse(std::vector<uint8_t>(serialized.begin(), serialized.end()));
+	ASSERT_TRUE(parsed.has_value()) << error.value_or("");
+
+	const std::string json = parsed->to_json();
+	EXPECT_NE(json.find("non-UTF8"), std::string::npos);
+}
+
+TEST(OnnxModelTest, PackedInt4InitializerByteSizeMatchesPackedBytes)
+{
+	onnx::ModelProto model;
+	model.set_ir_version(9);
+	auto* graph = model.mutable_graph();
+	graph->set_name("int4_graph");
+
+	// INT4 packs two 4-bit values per int32_data entry: 4 elements -> 2 packed bytes.
+	auto* weight = graph->add_initializer();
+	weight->set_name("Q");
+	weight->set_data_type(onnx::TensorProto::INT4);
+	weight->add_dims(4);
+	weight->add_int32_data(33);
+	weight->add_int32_data(67);
+
+	std::string serialized;
+	model.SerializeToString(&serialized);
+
+	auto [parsed, error] = OnnxModel::parse(std::vector<uint8_t>(serialized.begin(), serialized.end()));
+	ASSERT_TRUE(parsed.has_value()) << error.value_or("");
+
+	const auto inits = parsed->initializers();
+	ASSERT_EQ(inits.size(), 1u);
+	EXPECT_EQ(inits.front().byte_size_, 2u);
+}
+
+TEST(OnnxModelTest, NonUtf8MetadataRendersHex)
+{
+	onnx::ModelProto model;
+	model.set_ir_version(9);
+	const char bad[] = { static_cast<char>(0xC3), 0x28 }; // invalid UTF-8 sequence
+	model.set_doc_string(std::string(bad, sizeof(bad)));
+	auto* prop = model.add_metadata_props();
+	prop->set_key("blob");
+	prop->set_value(std::string(bad, sizeof(bad)));
+	auto* graph = model.mutable_graph();
+	graph->set_name("meta_graph");
+
+	std::string serialized;
+	model.SerializeToString(&serialized);
+
+	auto [parsed, error] = OnnxModel::parse(std::vector<uint8_t>(serialized.begin(), serialized.end()));
+	ASSERT_TRUE(parsed.has_value()) << error.value_or("");
+
+	const std::string json = parsed->to_json();
+	EXPECT_NE(json.find("non-UTF8"), std::string::npos);
+}

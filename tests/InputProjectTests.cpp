@@ -199,3 +199,36 @@ TEST(InputProjectTest, LoadFailsForMissingFile)
 	EXPECT_FALSE(project.has_value());
 	EXPECT_TRUE(error.has_value());
 }
+
+TEST(InputProjectTest, RejectsEmptyPathEntries)
+{
+	auto [from_string, string_error] = InputProject::parse(R"({ "inputs": [""] })", "test");
+	EXPECT_FALSE(from_string.has_value());
+	ASSERT_TRUE(string_error.has_value());
+	EXPECT_NE(string_error->find("must not be an empty path"), std::string::npos);
+
+	auto [from_object, object_error] = InputProject::parse(R"({ "inputs": [ { "name": "audio", "path": "" } ] })", "test");
+	EXPECT_FALSE(from_object.has_value());
+	ASSERT_TRUE(object_error.has_value());
+	EXPECT_NE(object_error->find("'inputs[0].path' must not be empty"), std::string::npos);
+}
+
+TEST(InputProjectTest, RejectsOversizedRandomByteSize)
+{
+	const std::string script = R"({
+		"inputs": [ { "name": "x", "random": { "data_type": "DOUBLE", "shape": [1073741824] } } ]
+	})";
+
+	auto [project, error] = InputProject::parse(script, "test");
+	EXPECT_FALSE(project.has_value());
+	ASSERT_TRUE(error.has_value());
+	EXPECT_NE(error->find("byte size exceeds limit"), std::string::npos);
+}
+
+TEST(InputProjectTest, RejectsOversizedDimOverride)
+{
+	auto [project, error] = InputProject::parse(R"({ "dim_overrides": { "N": 2147483648 } })", "test");
+	EXPECT_FALSE(project.has_value());
+	ASSERT_TRUE(error.has_value());
+	EXPECT_NE(error->find("'dim_overrides.N' exceeds limit"), std::string::npos);
+}
