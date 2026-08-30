@@ -64,7 +64,7 @@ namespace YirangOnnx
 
 		if (repeat == 1)
 		{
-			Logger::handle().write(LogTypes::Information, std::format("inference took {:.2f} ms", durations_ms.front()));
+			Logger::handle().write(LogTypes::Information, std::format("inference took {}", duration_text(durations_ms.front())));
 		}
 		else
 		{
@@ -77,8 +77,9 @@ namespace YirangOnnx
 				maximum = std::max(maximum, value);
 				sum += value;
 			}
-			Logger::handle().write(LogTypes::Information, std::format("inference: {} runs (+{} warmup), avg {:.2f} ms, min {:.2f} ms, max {:.2f} ms", repeat,
-																	  job.run_.warmup_, sum / static_cast<double>(durations_ms.size()), minimum, maximum));
+			const double average = sum / static_cast<double>(durations_ms.size());
+			Logger::handle().write(LogTypes::Information, std::format("inference: {} runs (+{} warmup), avg {}, min {}, max {} ({})", repeat, job.run_.warmup_,
+																	  duration_text(average), duration_text(minimum), duration_text(maximum), throughput_text(average)));
 		}
 
 		return process_outputs(outputs, job.outputs_);

@@ -28,7 +28,7 @@ yirang-onnx는 공식 `onnx.proto` 스키마를 벤더링하고 `protoc`로 C++ 
 
 - **잡 스크립트 구동**: `--input-script input_project.json` — model/inspect/inputs/dim_overrides/run/outputs를 한 파일로 기술(스크립트 우선, CLI는 보충). 손상 스크립트는 명시적 오류(exit 2).
 - **랜덤 입력 생성**: `inputs` 생략 또는 `random` 스펙으로 그래프 입력 형상·dtype에 맞는 텐서를 자동 생성(FLOAT/DOUBLE/INT32/INT64/BOOL, seed 재현성, 심볼릭 차원은 `dim_overrides`).
-- **벤치마크**: `run.warmup`/`run.repeat`로 반복 실행, avg/min/max ms 보고. 엔진은 세션을 1회 로드 후 재사용(`InferenceEngine::load/run` 분리).
+- **벤치마크**: `run.warmup`/`run.repeat`로 반복 실행, avg/min/max + 처리율(runs/s) 보고. 시간은 적응형 단위(1 ms 미만은 µs)로 표기해 소형 모델에서도 분산이 보입니다. 엔진은 세션을 1회 로드 후 재사용(`InferenceEngine::load/run` 분리).
 - **출력 후처리**: 출력별 통계(min/max/mean), `.pb` 저장 토글, JSON 값 덤프(`dump_json`).
 - **세션 튜닝**: 설정 파일에서 ONNX Runtime 세션 옵션(`intra_op_threads`/`inter_op_threads`, `enable_mem_pattern`, `enable_cpu_mem_arena`, `execution_mode`, `graph_optimization`)을 지정. 미지정 시 ORT 기본값을 유지하고, 적용된 값은 추론 시 로그로 보고.
 - **입력 검증**: 잡 스크립트는 **엄격 검증**(알 수 없는 키 거부 → exit 2로 오타 차단, `_` 접두어는 주석 예외; `random.data_type`·과대 `shape`·`repeat`/`warmup` 상한을 파스 시점에 거부). 엔진 설정 파일은 **비치명 경고**(타입 불일치·범위 이탈·미지 키는 경고 후 기본값으로 진행 — 어떤 값도 프로세스를 중단시키지 않음).
@@ -254,14 +254,15 @@ CMake 타겟 `OnnxParser`를 링크하면 생성된 proto, protobuf, CppToolkit 
 ctest --test-dir build --output-on-failure
 ```
 
-GoogleTest 스위트(`tests/`, 84개)는 파서(파싱·추출·속성 값·서브그래프·external_data·
+GoogleTest 스위트(`tests/`, 86개)는 파서(파싱·추출·속성 값·서브그래프·external_data·
 파라미터 총계·렌더링·오류 경로), CLI 설정(`Configurations` 기본값/CLI 파싱/엔진 설정 로드/
 `--input-script`/`--help`·`--version`/손상 설정 경고 + **비치명 검증**: 타입 불일치·로그 레벨
 범위·미지 키 경고·비정수 값 크래시 안전성 + **세션 튜닝** 파싱·검증), 잡 스크립트
 (`InputProject` 전체 스키마/축약형/오류 거부 + **엄격 검증**: 미지 키 거부·`_` 주석 허용·
 불량 dtype·과대 shape·repeat 상한), 랜덤 입력(`InputBuilder` 형상 해석/시드 재현성/미지원
 dtype/과대 shape 거부), **추론 end-to-end**(`InferenceEngine` 세션 재사용·값 정확성·오류
-경로·세션 튜닝 적용), 추론 실행 지원(`RunSupport` 입력 해석·출력 후처리·저장 검증),
+경로·세션 튜닝 적용), 추론 실행 지원(`RunSupport` 입력 해석·출력 후처리·저장 검증·
+벤치마크 시간 표기),
 TensorProto↔Tensor 변환(`TensorConvert` 왕복/미지원 dtype 거부)을 검증합니다.
 
 추가로 **CLI 바이너리 스모크 15종**(`cli_smoke_*`)이 `examples/` 자산으로 실제 실행 파일을

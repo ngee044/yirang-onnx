@@ -246,6 +246,7 @@ auto main(int argc, char* argv[]) -> int
 	Logger::handle().console_mode(console_mode);
 	Logger::handle().write_interval(configurations->write_interval());
 	Logger::handle().log_root(configurations->log_root_path());
+	Logger::handle().max_lines(0);
 
 	Logger::handle().start(configurations->app_title());
 

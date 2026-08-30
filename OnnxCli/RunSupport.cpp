@@ -128,6 +128,30 @@ namespace YirangOnnx
 		return std::format("[{}]", joined);
 	}
 
+	auto duration_text(double milliseconds) -> std::string
+	{
+		if (milliseconds < 1.0)
+		{
+			return std::format("{:.1f} us", milliseconds * 1000.0);
+		}
+		return std::format("{:.2f} ms", milliseconds);
+	}
+
+	auto throughput_text(double average_milliseconds) -> std::string
+	{
+		if (average_milliseconds <= 0.0)
+		{
+			return "n/a";
+		}
+
+		const double runs_per_second = 1000.0 / average_milliseconds;
+		if (runs_per_second >= 1000.0)
+		{
+			return std::format("{:.1f}k runs/s", runs_per_second / 1000.0);
+		}
+		return std::format("{:.1f} runs/s", runs_per_second);
+	}
+
 	auto tuning_summary(const SessionTuning& tuning) -> std::string
 	{
 		const std::string intra = tuning.intra_op_threads_.has_value() ? std::to_string(tuning.intra_op_threads_.value()) : "default";

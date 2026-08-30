@@ -136,6 +136,23 @@ TEST(RunSupportTest, SafeFileNameReplacesSeparators)
 	EXPECT_EQ(safe_file_name("plain"), "plain");
 }
 
+TEST(RunSupportTest, DurationTextSwitchesToMicrosecondsBelowOneMillisecond)
+{
+	EXPECT_EQ(duration_text(0.003), "3.0 us");
+	EXPECT_EQ(duration_text(0.0004), "0.4 us");
+	EXPECT_EQ(duration_text(0.9999), "999.9 us");
+	EXPECT_EQ(duration_text(1.0), "1.00 ms");
+	EXPECT_EQ(duration_text(12.345), "12.35 ms");
+}
+
+TEST(RunSupportTest, ThroughputTextScalesAndGuardsZero)
+{
+	EXPECT_EQ(throughput_text(0.003), "333.3k runs/s");
+	EXPECT_EQ(throughput_text(1.0), "1.0k runs/s");
+	EXPECT_EQ(throughput_text(5000.0), "0.2 runs/s");
+	EXPECT_EQ(throughput_text(0.0), "n/a");
+}
+
 TEST(RunSupportTest, WriteFileBytesWritesAndVerifies)
 {
 	ScopedTempFile file(::testing::UnitTest::GetInstance()->current_test_info()->name() + std::string(".bin"));

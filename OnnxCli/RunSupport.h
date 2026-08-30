@@ -25,6 +25,8 @@ namespace YirangOnnx
 	};
 
 	auto shape_string(const std::vector<int64_t>& shape) -> std::string;
+	auto duration_text(double milliseconds) -> std::string;
+	auto throughput_text(double average_milliseconds) -> std::string;
 	auto tuning_summary(const SessionTuning& tuning) -> std::string;
 	auto safe_file_name(const std::string& name) -> std::string;
 	auto write_file_bytes(const std::string& path, const uint8_t* data, size_t size) -> std::optional<std::string>;
