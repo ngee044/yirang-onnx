@@ -1,5 +1,11 @@
 {
 	"app_title": "yirang-onnx",
 	"log_root_path": "logs/",
-	"write_interval": 1000
+	"write_interval": 1000,
+	"intra_op_threads": 1,
+	"inter_op_threads": 1,
+	"enable_mem_pattern": true,
+	"enable_cpu_mem_arena": true,
+	"execution_mode": "sequential",
+	"graph_optimization": "all"
 }

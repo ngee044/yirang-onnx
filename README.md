@@ -30,7 +30,8 @@ yirang-onnx는 공식 `onnx.proto` 스키마를 벤더링하고 `protoc`로 C++ 
 - **랜덤 입력 생성**: `inputs` 생략 또는 `random` 스펙으로 그래프 입력 형상·dtype에 맞는 텐서를 자동 생성(FLOAT/DOUBLE/INT32/INT64/BOOL, seed 재현성, 심볼릭 차원은 `dim_overrides`).
 - **벤치마크**: `run.warmup`/`run.repeat`로 반복 실행, avg/min/max + 처리율(runs/s) 보고. 시간은 적응형 단위(1 ms 미만은 µs)로 표기해 소형 모델에서도 분산이 보입니다. 엔진은 세션을 1회 로드 후 재사용(`InferenceEngine::load/run` 분리).
 - **출력 후처리**: 출력별 통계(min/max/mean), `.pb` 저장 토글, JSON 값 덤프(`dump_json`).
-- **세션 튜닝**: 설정 파일에서 ONNX Runtime 세션 옵션(`intra_op_threads`/`inter_op_threads`, `enable_mem_pattern`, `enable_cpu_mem_arena`, `execution_mode`, `graph_optimization`)을 지정. 미지정 시 ORT 기본값을 유지하고, 적용된 값은 추론 시 로그로 보고.
+- **세션 튜닝**: 설정 파일에서 ONNX Runtime 세션 옵션(`intra_op_threads`/`inter_op_threads`, `enable_mem_pattern`, `enable_cpu_mem_arena`, `execution_mode`, `graph_optimization`)을 지정. 배포 설정은 libNaud 소스 기본값에 맞춘 스레드 1/1, 메모리 패턴·CPU arena 활성, sequential/all입니다. 설정을 생략하거나 스레드를 0으로 지정하면 ORT 자동 선택을 사용하며, 적용된 값은 추론 시 로그로 보고합니다.
+- **준비된 추론 API**: 라이브러리에서 `prepare → run_prepared → collect_outputs`로 입출력 준비·반복 실행·결과 복사를 분리합니다. 고정 출력 버퍼를 재사용하며 동적 출력은 ORT가 할당합니다. CLI 반복 루프는 기존 `run()` 경로를 사용합니다.
 - **입력 검증**: 잡 스크립트는 **엄격 검증**(알 수 없는 키 거부 → exit 2로 오타 차단, `_` 접두어는 주석 예외; `random.data_type`·과대 `shape`·`repeat`/`warmup` 상한을 파스 시점에 거부). 엔진 설정 파일은 **비치명 경고**(타입 불일치·범위 이탈·미지 키는 경고 후 기본값으로 진행 — 어떤 값도 프로세스를 중단시키지 않음).
 - 파일 로드(`OnnxModel::load`) 또는 인메모리 버퍼 파싱(`OnnxModel::parse`). ONNX proto2 스키마(v1.17.0) 기반으로 opset에 무관하게 추출.
 - 3종 출력 포맷: `summary`(텍스트, 파라미터 총수·총 바이트 포함), `json`(분석 — 노드 속성 값·external_data·총계 포함), `dot`(시각화 — 그래프 입출력 노드 표시). `--weights`로 초기화자(가중치) **실제 값**을 JSON에 포함. 서브그래프(If/Loop)의 노드는 히스토그램·노드 수에 합산.
@@ -248,26 +249,69 @@ const std::string dot = model->to_dot();
 CMake 타겟 `OnnxParser`를 링크하면 생성된 proto, protobuf, CppToolkit `Utilities`가
 전이적으로 전파됩니다.
 
+추론만 사용할 때는 `OnnxInference`를 링크합니다. 기존 `run(inputs)`는 매 실행마다 독립된
+출력 `Tensor`를 반환합니다. 최종 결과만 필요한 반복 실행에는 다음 API를 사용할 수 있습니다.
+
+```cpp
+#include "InferenceEngine.h"
+
+using namespace YirangOnnx;
+
+auto infer_ten_times(const std::string& model_path, const std::vector<Tensor>& inputs)
+    -> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>
+{
+    InferenceEngine engine;
+    SessionTuning tuning;
+    tuning.intra_op_threads_ = 1;
+    tuning.inter_op_threads_ = 1;
+    if (auto result = engine.load(model_path, tuning); !result)
+    {
+        return {std::nullopt, result.error()};
+    }
+    if (auto result = engine.prepare(inputs); !result)
+    {
+        return {std::nullopt, result.error()};
+    }
+    for (int i = 0; i < 10; ++i)
+    {
+        if (auto result = engine.run_prepared(inputs); !result)
+        {
+            return {std::nullopt, result.error()};
+        }
+    }
+    return engine.collect_outputs();
+}
+```
+
+입력 데이터는 호출자가 소유하며 준비 상태를 사용하는 동안 버퍼를 유지해야 합니다.
+동일 버퍼의 내용은 갱신할 수 있지만 입력 순서·이름·dtype·shape·주소·크기가 바뀌면
+`prepare()`를 다시 호출해야 합니다. ORT 출력이 입력과 메모리를 공유할 수 있으므로,
+이전 결과를 보존하려면 입력을 변경·재할당·해제하기 전에 `collect_outputs()`를 호출합니다.
+회수한 `Tensor`는 독립된 복사본입니다. 같은 엔진의 준비·실행·회수·재로드는 직렬로 호출합니다.
+동적 출력과 scalar·미지 rank 출력은 실행마다 ORT 할당 대상으로 재바인딩합니다.
+실행 실패 후에는 이전 출력을 회수할 수 없고, 준비 실패나 모델 재로드는 준비 상태를 해제합니다.
+
 ## 테스트
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-GoogleTest 스위트(`tests/`, 86개)는 파서(파싱·추출·속성 값·서브그래프·external_data·
+GoogleTest 스위트(`tests/`, 96개)는 파서(파싱·추출·속성 값·서브그래프·external_data·
 파라미터 총계·렌더링·오류 경로), CLI 설정(`Configurations` 기본값/CLI 파싱/엔진 설정 로드/
 `--input-script`/`--help`·`--version`/손상 설정 경고 + **비치명 검증**: 타입 불일치·로그 레벨
 범위·미지 키 경고·비정수 값 크래시 안전성 + **세션 튜닝** 파싱·검증), 잡 스크립트
 (`InputProject` 전체 스키마/축약형/오류 거부 + **엄격 검증**: 미지 키 거부·`_` 주석 허용·
 불량 dtype·과대 shape·repeat 상한), 랜덤 입력(`InputBuilder` 형상 해석/시드 재현성/미지원
 dtype/과대 shape 거부), **추론 end-to-end**(`InferenceEngine` 세션 재사용·값 정확성·오류
-경로·세션 튜닝 적용), 추론 실행 지원(`RunSupport` 입력 해석·출력 후처리·저장 검증·
+경로·세션 튜닝 적용·준비 실행 결과 동등성·입력 갱신/재바인딩·동적 출력·실패 후 상태 해제), 추론 실행 지원(`RunSupport` 입력 해석·출력 후처리·저장 검증·
 벤치마크 시간 표기),
 TensorProto↔Tensor 변환(`TensorConvert` 왕복/미지원 dtype 거부)을 검증합니다.
 
 추가로 **CLI 바이너리 스모크 15종**(`cli_smoke_*`)이 `examples/` 자산으로 실제 실행 파일을
 구동해 종료 코드(0/1/2)·출력 패턴·산출물 생성(스크립트 우선순위, CLI 보충, `--input` 직접
 추론, 미지 CLI 플래그 거부, 스크립트 상대 경로 해석 포함)을 ctest에서 자동 검증합니다.
+현재 CTest 등록 수는 GoogleTest 96개와 CLI smoke 15개를 합한 111개입니다.
 
 ## 디렉터리 레이아웃
 

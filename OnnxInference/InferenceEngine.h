@@ -29,6 +29,10 @@ namespace YirangOnnx
 
 		auto run(const std::vector<Tensor>& inputs) const -> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>;
 
+		auto prepare(const std::vector<Tensor>& inputs) -> std::expected<void, std::string>;
+		auto run_prepared(const std::vector<Tensor>& inputs) -> std::expected<void, std::string>;
+		auto collect_outputs(void) const -> std::tuple<std::optional<std::vector<Tensor>>, std::optional<std::string>>;
+
 	private:
 		struct Backend;
 		std::unique_ptr<Backend> backend_;
